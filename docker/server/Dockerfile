@@ -5,12 +5,15 @@ apt-transport-https \
 apt-utils \
 ca-certificates \
 libterm-readline-gnu-perl \
-python-pip \
+python3-dev \
+python3-pip \
+python3-setuptools \
+python3-wheel \
 software-properties-common \
 && rm -rf /var/lib/apt/lists/*
 
-RUN pip install urllib3 cryptography --upgrade
-RUN pip install turbinia
+RUN pip3 install urllib3 cryptography --upgrade
+RUN pip3 install turbinia
 
 RUN useradd -r -s /bin/nologin -G disk turbinia
 
