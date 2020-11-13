@@ -1,5 +1,5 @@
 ## Docker configuration file for the Turbinia client
-This Docker configuration is for building Turbinia client image.
+This Docker configuration is for building a Turbinia client image.
 
 ### Build the image
 ```
