@@ -37,5 +37,5 @@ docker build -t turbinia-$TYPE:$TAG -f docker/$TYPE/Dockerfile .
 docker tag turbinia-$TYPE:$TAG gcr.io/$PROJECT/turbinia/turbinia-$TYPE:$TAG
 docker push gcr.io/$PROJECT/turbinia/turbinia-$TYPE:$TAG
 if [ -z "$3" ] && [ -z "$4" ]; then
-    gcloud compute instances update-container $INSTANCE --zone=$ZONE --container-image=gcr.io/$PROJECT/turbinia/turbinia-$TYPE:$TAG
+    gcloud --project=$PROJECT compute instances update-container $INSTANCE --zone=$ZONE --container-image=gcr.io/$PROJECT/turbinia/turbinia-$TYPE:$TAG
 fi
