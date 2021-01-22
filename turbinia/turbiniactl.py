@@ -408,6 +408,7 @@ def main():
   if config.TASK_MANAGER == 'PSQ':
     from turbinia.lib import google_cloud
     
+
   if args.log_file:
     config.LOG_FILE = args.log_file
   if args.output_dir:

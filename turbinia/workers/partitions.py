@@ -16,7 +16,7 @@
 
 import sys
 
-if sys.argv in ('celeryworker', 'psqworker'):
+if sys.argv in ('celeryworker', 'psqworker', 'nosetests'):
   from dfvfs.helpers import volume_scanner
   from dfvfs.lib import definitions as dfvfs_definitions
   from dfvfs.lib import errors as dfvfs_errors
