@@ -28,14 +28,14 @@ jobs:
         time: 5s
     - name: Show running instances
       run: docker ps -a
-    - name: Show server logs
-      run: docker logs turbinia-server
-    - name: Show worker logs
-      run: docker logs turbinia-worker
+    - name: Show container logs
+      run: |
+        docker logs turbinia-server
+        docker logs turbinia-worker
     - name: Run E2E test
       run: |
-        docker exec -ti turbinia-server turbiniactl compresseddirectory -l /evidence/history.tgz | tee request.txt
-        echo "REQUESTID=`cat out.txt |grep Creating | sed -e 's/.*request \(.*\) with.*/\1/'`" >> $GITHUB_ENV
+        docker exec turbinia-server turbiniactl compresseddirectory -l /evidence/history.tgz > request.txt
+        echo "REQUEST_ID=`cat request.txt |grep Creating | sed -e 's/.*request \(.*\) with.*/\1/'`" >> $GITHUB_ENV
     - name: Poll request status
       run: docker exec -ti turbinia-server turbiniactl -a status -r $REQUEST_ID
 
