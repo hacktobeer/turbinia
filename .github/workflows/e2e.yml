@@ -8,12 +8,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
-    - uses: isbang/compose-action@v0.1
+    - name: Prepare docker configuration and test evidence
+      run: |
+        mkdir ./conf
+        mkdir ./evidence
+        sed -f ./docker/local/local-config.sed ./turbinia/config/turbinia_config_tmpl.py > conf/turbinia.conf
+        curl https://raw.githubusercontent.com/obsidianforensics/hindsight/master/tests/fixtures/profiles/60/History > History
+        tar -vzcf ./evidence/history.tgz History
+    - name: Startup local turbinia stack
+      uses: isbang/compose-action@v0.1
       with:
         compose-file: './docker/local/docker-compose.yml'
+    - name: Sleep for 5 seconds
+      uses: jakejarvis/wait-action@master
+      with:
+        time: '5s'
     - name: Show running instances
       run: docker ps
     - name: Show server logs
       run: docker logs turbinia-server
     - name: Show worker logs
-      run: docker logs turbinia worker
+      run: docker logs turbinia-worker
