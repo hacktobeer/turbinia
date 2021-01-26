@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
-    - name: Prepare docker configuration and test evidence
+    - name: Prepare Turbinia configuration and e2e evidence
       run: |
         mkdir ./conf
         mkdir ./evidence
@@ -16,18 +16,18 @@ jobs:
         sed -f ./docker/local/local-config.sed ./turbinia/config/turbinia_config_tmpl.py > ./conf/turbinia.conf
         curl https://raw.githubusercontent.com/obsidianforensics/hindsight/master/tests/fixtures/profiles/60/History > History
         tar -vzcf ./evidence/history.tgz History
-    - name: Verify all files are present
+    - name: Verify Turbinia configuration and evidence
       run: |
         cat ./conf/turbinia.conf
         ls -al ./evidence
     - name: Startup local turbinia docker-compose stack
-      run: docker-compose -f ./docker/local/docker-compose.yml up
+      run: docker-compose -f ./docker/local/docker-compose.yml up -d
     - name: Sleep for 5s
       uses: juliangruber/sleep-action@v1
       with:
         time: 5s
     - name: Show running instances
-      run: docker ps
+      run: docker ps -a
     - name: Show server logs
       run: docker logs turbinia-server
     - name: Show worker logs
