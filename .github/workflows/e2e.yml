@@ -12,17 +12,20 @@ jobs:
       run: |
         mkdir ./conf
         mkdir ./evidence
-        sed -f ./docker/local/local-config.sed ./turbinia/config/turbinia_config_tmpl.py > conf/turbinia.conf
+        sed -f ./docker/local/local-config.sed ./turbinia/config/turbinia_config_tmpl.py > ./conf/turbinia.conf
         curl https://raw.githubusercontent.com/obsidianforensics/hindsight/master/tests/fixtures/profiles/60/History > History
         tar -vzcf ./evidence/history.tgz History
-    - name: Startup local turbinia stack
-      uses: isbang/compose-action@v0.1
+    - name: Verify all files are present
+      run: |
+        ls -al
+        ls -al ./conf
+        ls -al ./evidence
+    - name: Sleep for 5s
+      uses: juliangruber/sleep-action@v1
       with:
-        compose-file: './docker/local/docker-compose.yml'
-    - name: Sleep for 5 seconds
-      uses: jakejarvis/wait-action@master
-      with:
-        time: '5s'
+        time: 5s
+    - name: Startup local turbinia docker-compose stack
+      run: docker-compose -d -f ./docker/local/docker-compose.yml up
     - name: Show running instances
       run: docker ps
     - name: Show server logs
