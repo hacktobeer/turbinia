@@ -35,7 +35,17 @@ jobs:
     - name: Run E2E test
       run: |
         docker exec turbinia-server turbiniactl compresseddirectory -l /evidence/history.tgz > request.txt
+        cat request.txt
         echo "REQUEST_ID=`cat request.txt |grep Creating | sed -e 's/.*request \(.*\) with.*/\1/'`" >> $GITHUB_ENV
+        echo $REQUEST_ID
     - name: Poll request status
-      run: docker exec -ti turbinia-server turbiniactl -a status -r $REQUEST_ID
+      run: docker exec turbinia-server turbiniactl -a status -r $REQUEST_ID
+    - name: Sleep for 5s
+      uses: juliangruber/sleep-action@v1
+      with:
+        time: 5s
+    - name: Show container logs
+      run: |
+        docker logs turbinia-server
+        docker logs turbinia-worker
 
