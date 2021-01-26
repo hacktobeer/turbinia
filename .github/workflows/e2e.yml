@@ -38,12 +38,12 @@ jobs:
         cat request.txt
         echo "REQUEST_ID=`cat request.txt |grep Creating | sed -e 's/.*request \(.*\) with.*/\1/'`" >> $GITHUB_ENV
         echo $REQUEST_ID
-    - name: Poll request status
-      run: docker exec turbinia-server turbiniactl -a status -r $REQUEST_ID
-    - name: Sleep for 5s
+    - name: Sleep for 60s
       uses: juliangruber/sleep-action@v1
       with:
-        time: 5s
+        time: 60s
+    - name: Poll request status
+      run: docker exec turbinia-server turbiniactl -a status -r $REQUEST_ID
     - name: Show container logs
       run: |
         docker logs turbinia-server
