@@ -12,23 +12,30 @@ jobs:
       run: |
         mkdir ./conf
         mkdir ./evidence
+        chmod 777 ./evidence
         sed -f ./docker/local/local-config.sed ./turbinia/config/turbinia_config_tmpl.py > ./conf/turbinia.conf
         curl https://raw.githubusercontent.com/obsidianforensics/hindsight/master/tests/fixtures/profiles/60/History > History
         tar -vzcf ./evidence/history.tgz History
     - name: Verify all files are present
       run: |
-        ls -al
-        ls -al ./conf
+        cat ./conf/turbinia.conf
         ls -al ./evidence
+    - name: Startup local turbinia docker-compose stack
+      run: docker-compose -f ./docker/local/docker-compose.yml up
     - name: Sleep for 5s
       uses: juliangruber/sleep-action@v1
       with:
         time: 5s
-    - name: Startup local turbinia docker-compose stack
-      run: docker-compose -f ./docker/local/docker-compose.yml up
     - name: Show running instances
       run: docker ps
     - name: Show server logs
       run: docker logs turbinia-server
     - name: Show worker logs
       run: docker logs turbinia-worker
+    - name: Run E2E test
+      run: |
+        docker exec -ti turbinia-server turbiniactl compresseddirectory -l /evidence/history.tgz | tee request.txt
+        echo "REQUESTID=`cat out.txt |grep Creating | sed -e 's/.*request \(.*\) with.*/\1/'`" >> $GITHUB_ENV
+    - name: Poll request status
+      run: docker exec -ti turbinia-server turbiniactl -a status -r $REQUEST_ID
+
