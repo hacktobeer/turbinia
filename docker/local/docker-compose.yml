@@ -17,7 +17,7 @@ services:
 
  turbinia-server:
     #image: "turbinia-server-dev" # Use this for local development and comment out below line
-    image: "us-docker.pkg.dev/osdfir-registry/turbinia/release/turbinia-server:latest" # Latest stable
+    image: "us-docker.pkg.dev/osdfir-registry/turbinia/release/turbinia-server-dev:latest" # Latest stable
     container_name: turbinia-server
 
     volumes:
@@ -30,7 +30,7 @@ services:
 
  turbinia-worker:
     #image: "turbinia-worker-dev" # Use this for local development and comment out below line
-    image: "us-docker.pkg.dev/osdfir-registry/turbinia/release/turbinia-worker:latest" # Latest stable
+    image: "us-docker.pkg.dev/osdfir-registry/turbinia/release/turbinia-worker-dev:latest" # Latest stable
     container_name: turbinia-worker
     privileged: true
     

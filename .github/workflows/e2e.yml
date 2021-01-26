@@ -1,0 +1,19 @@
+name: Turbinia E2E Test
+
+on: push
+
+jobs:
+  e2e-test:
+    name: Run local stack e2e test
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - uses: isbang/compose-action@v0.1
+      with:
+        compose-file: './docker/local/docker-compose.yml'
+    - name: Show running instances
+      run: docker ps
+    - name: Show server logs
+      run: docker logs turbinia-server
+    - name: Show worker logs
+      run: docker logs turbinia worker
