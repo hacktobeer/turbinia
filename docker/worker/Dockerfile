@@ -27,7 +27,6 @@ RUN pip3 install pip --upgrade
 
 # Install third-party worker dependencies
 RUN pip3 install pyhindsight
-RUN pip3 install --upgrade keyrings.alt
 RUN pip3 install docker-explorer
 
 # Install Plaso
