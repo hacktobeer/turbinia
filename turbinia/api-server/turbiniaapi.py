@@ -5,21 +5,21 @@
 # http://127.0.0.1:8000/docs
 # http://127.0.0.1:8000/redoc
 
+import getpass
+import os
+import uuid
+from enum import Enum
+from typing import List, Optional
+
 from fastapi import FastAPI
 from pydantic import BaseModel
-from typing import Optional, List
-import uuid
-import os
-from enum import Enum
-import getpass
 
-from turbinia import client as TurbiniaClientProvider
 from turbinia import TurbiniaException
+from turbinia import client as TurbiniaClientProvider
+from turbinia import config, evidence
 from turbinia.client import TurbiniaCeleryClient
-from turbinia import config
-from turbinia import evidence
-from turbinia.processors import archive
 from turbinia.message import TurbiniaRequest
+from turbinia.processors import archive
 
 
 class Generic(BaseModel):
@@ -109,4 +109,5 @@ def createrequest(evidence_type: Evidence, req: Request):
   request = TurbiniaRequest(request_id=request_id, requester=getpass.getuser())
   request.evidence.append(evidence_)
   client.send_request(request)
+
   return request_id
