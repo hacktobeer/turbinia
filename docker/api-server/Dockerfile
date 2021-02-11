@@ -9,5 +9,7 @@ RUN cd /tmp/ && python3 setup.py install
 COPY turbinia/api-server /app
 RUN ls -al /app
 
+RUN mkdir /app/evidence
+
 ENV MODULE_NAME=turbiniaapi
 ENV VARIABLE_NAME=api
