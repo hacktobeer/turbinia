@@ -40,7 +40,7 @@ You can interactivly use the API with the Swagger UI, curl from the commandline 
 
 ## Python client library
 
-A very simple Python API client library wrapper is available as well.
+A very simple Python API client library wrapper is available as well. See [here](../api-client)
 
 ## Python client library generation
 
