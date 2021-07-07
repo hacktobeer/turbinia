@@ -700,7 +700,7 @@ class TurbiniaTask:
       TurbiniaException: If the evidence can not be found.
     """
     self.setup_metrics()
-    self.output_manager.setup(self.name, self.id)
+    self.output_manager.setup(self.name, self.id, self.request_id)
     self.tmp_dir, self.output_dir = self.output_manager.get_local_output_dirs()
     if not self.result:
       self.result = self.create_result(input_evidence=evidence)
@@ -722,7 +722,6 @@ class TurbiniaTask:
 
     Arguments:
       task_map(dict): Map of task names to task objects
-
     Returns:
       Dict: Mapping of task names to metrics objects.
     """
