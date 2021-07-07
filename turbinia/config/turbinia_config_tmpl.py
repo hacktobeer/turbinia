@@ -15,7 +15,7 @@
 """Turbinia Config Template"""
 
 from __future__ import unicode_literals
-
+from os import uname
 ################################################################################
 #                          Base Turbinia configuration
 #
@@ -49,7 +49,7 @@ TMP_DIR = '/tmp'
 LOG_FILE = '%s/turbinia.log' % OUTPUT_DIR
 
 # Path to a lock file used for the worker tasks.
-LOCK_FILE = '%s/turbinia-worker.lock' % OUTPUT_DIR
+LOCK_FILE = '%s/%s.lock' % (OUTPUT_DIR, uname().nodename)
 
 # Time in seconds to sleep in task management loops
 SLEEP_TIME = 10
