@@ -481,7 +481,7 @@ class TurbiniaTask:
     Returns:
       bool: If the current execution is in a worker or nosetests.
     """
-    if config.TURBINIA_COMMAND in ('celeryworker', 'psqworker'):
+    if config.TURBINIA_COMMAND in ('celeryworker'):
       return True
 
     for arg in sys.argv:

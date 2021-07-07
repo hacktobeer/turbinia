@@ -32,7 +32,7 @@ from turbinia.config import logger
 from turbinia import __version__
 from turbinia.processors import archive
 from turbinia.output_manager import OutputManager
-from turbinia.output_manager import GCSOutputWriter
+### from turbinia.output_manager import GCSOutputWriter
 
 log = logging.getLogger('turbinia')
 # We set up the logger first without the file handler, and we will set up the
@@ -295,11 +295,11 @@ def main():
       help='List all available Jobs. These Job names can be used by '
       '--jobs_allowlist and --jobs_denylist')
 
-  # PSQ Worker
-  parser_psqworker = subparsers.add_parser('psqworker', help='Run PSQ worker')
-  parser_psqworker.add_argument(
-      '-S', '--single_threaded', action='store_true',
-      help='Run PSQ Worker in a single thread', required=False)
+  ### # PSQ Worker
+  # parser_psqworker = subparsers.add_parser('psqworker', help='Run PSQ worker')
+  # parser_psqworker.add_argument(
+  #     '-S', '--single_threaded', action='store_true',
+  #     help='Run PSQ Worker in a single thread', required=False)
 
   # Celery Worker
   subparsers.add_parser('celeryworker', help='Run Celery worker')
@@ -357,46 +357,46 @@ def main():
       'default timeframe is 7 days. Please use the -d flag to extend this. '
       'Additionaly, you can use the -a or --all_fields flag to retrieve the '
       'full output containing finished and unassigned worker tasks.')
-  parser_log_collector = subparsers.add_parser(
-      'gcplogs', help='Collects Turbinia logs from Stackdriver.')
-  parser_log_collector.add_argument(
-      '-o', '--output_dir', help='Directory path for output', required=False)
-  parser_log_collector.add_argument(
-      '-q', '--query',
-      help='Filter expression to use to query Stackdriver logs.')
-  parser_log_collector.add_argument(
-      '-d', '--days_history', default=1, type=int,
-      help='Number of days of history to show', required=False)
-  parser_log_collector.add_argument(
-      '-s', '--server_logs', action='store_true',
-      help='Collects all server related logs.')
-  parser_log_collector.add_argument(
-      '-w', '--worker_logs', action='store_true',
-      help='Collects all worker related logs.')
+  ### parser_log_collector = subparsers.add_parser(
+  #     'gcplogs', help='Collects Turbinia logs from Stackdriver.')
+  # parser_log_collector.add_argument(
+  #     '-o', '--output_dir', help='Directory path for output', required=False)
+  # parser_log_collector.add_argument(
+  #     '-q', '--query',
+  #     help='Filter expression to use to query Stackdriver logs.')
+  # parser_log_collector.add_argument(
+  #     '-d', '--days_history', default=1, type=int,
+  #     help='Number of days of history to show', required=False)
+  # parser_log_collector.add_argument(
+  #     '-s', '--server_logs', action='store_true',
+  #     help='Collects all server related logs.')
+  # parser_log_collector.add_argument(
+  #     '-w', '--worker_logs', action='store_true',
+  #     help='Collects all worker related logs.')
 
-  # Add GCS logs collector
-  parser_gcs_logs = subparsers.add_parser(
-      'dumpgcs', help='Get Turbinia results from Google Cloud Storage.')
-  parser_gcs_logs.add_argument(
-      '-o', '--output_dir', help='Directory path for output.', required=True)
-  parser_gcs_logs.add_argument(
-      '-t', '--task_id', help='Download all the results for given task_id.')
-  parser_gcs_logs.add_argument(
-      '-r', '--request_id',
-      help='Download all the results for given request_id.')
-  parser_gcs_logs.add_argument(
-      '-b', '--bucket',
-      help='Alternate GCS bucket to download from. Must be in the following '
-      'format gs://{BUCKET_NAME}/. Defaults to the BUCKET_NAME as specified '
-      'in the config')
-  parser_gcs_logs.add_argument(
-      '-d', '--days_history', default=0, type=int,
-      help='Number of days of history to to query results for', required=False)
-  parser_gcs_logs.add_argument(
-      '-i', '--instance_id',
-      help='Instance ID used to run tasks/requests. You must provide an '
-      'instance ID if the task/request was not processed on the same instance '
-      'as your confing file.')
+  #### Add GCS logs collector
+  # parser_gcs_logs = subparsers.add_parser(
+  #     'dumpgcs', help='Get Turbinia results from Google Cloud Storage.')
+  # parser_gcs_logs.add_argument(
+  #     '-o', '--output_dir', help='Directory path for output.', required=True)
+  # parser_gcs_logs.add_argument(
+  #     '-t', '--task_id', help='Download all the results for given task_id.')
+  # parser_gcs_logs.add_argument(
+  #     '-r', '--request_id',
+  #     help='Download all the results for given request_id.')
+  # parser_gcs_logs.add_argument(
+  #     '-b', '--bucket',
+  #     help='Alternate GCS bucket to download from. Must be in the following '
+  #     'format gs://{BUCKET_NAME}/. Defaults to the BUCKET_NAME as specified '
+  #     'in the config')
+  # parser_gcs_logs.add_argument(
+  #     '-d', '--days_history', default=0, type=int,
+  #     help='Number of days of history to to query results for', required=False)
+  # parser_gcs_logs.add_argument(
+  #     '-i', '--instance_id',
+  #     help='Instance ID used to run tasks/requests. You must provide an '
+  #     'instance ID if the task/request was not processed on the same instance '
+  #     'as your confing file.')
   # Server
   subparsers.add_parser('server', help='Run Turbinia Server')
 
@@ -434,14 +434,14 @@ def main():
   if args.debug_tasks:
     config.DEBUG_TASKS = True
 
-  if config.TASK_MANAGER == 'PSQ':
-    from turbinia.lib import google_cloud
-    from libcloudforensics.providers.gcp import forensics as gcp_forensics
+  ### if config.TASK_MANAGER == 'PSQ':
+  from turbinia.lib import google_cloud
+  from libcloudforensics.providers.gcp import forensics as gcp_forensics
 
-  # Enable GCP Stackdriver Logging
-  if config.STACKDRIVER_LOGGING and args.command in ('server', 'psqworker'):
-    google_cloud.setup_stackdriver_handler(
-        config.TURBINIA_PROJECT, args.command)
+  ### Enable GCP Stackdriver Logging
+  # if config.STACKDRIVER_LOGGING and args.command in ('server', 'psqworker'):
+  #   google_cloud.setup_stackdriver_handler(
+  #       config.TURBINIA_PROJECT, args.command)
 
   config.TURBINIA_COMMAND = args.command
 
@@ -456,7 +456,7 @@ def main():
   from turbinia.client import TurbiniaCeleryClient
   from turbinia.client import TurbiniaServer
   from turbinia.client import TurbiniaCeleryWorker
-  from turbinia.client import TurbiniaPsqWorker
+  ### from turbinia.client import TurbiniaPsqWorker
   from turbinia import evidence
   from turbinia.message import TurbiniaRequest
 
@@ -518,12 +518,14 @@ def main():
 
   # Create Client object
   client = None
-  if args.command not in ('psqworker', 'server'):
+  ###if args.command not in ('psqworker', 'server'):
+  if args.command not in ('server'):
     client = TurbiniaClientProvider.get_turbinia_client(args.run_local)
 
   # Make sure run_local flags aren't conflicting with other server/client flags
   server_flags_set = args.server or args.command == 'server'
-  worker_flags_set = args.command in ('psqworker', 'celeryworker')
+  ###worker_flags_set = args.command in ('psqworker', 'celeryworker')
+  worker_flags_set = args.command in ('celeryworker')
   if args.run_local and (server_flags_set or worker_flags_set):
     log.error('--run_local flag is not compatible with server/worker flags')
     sys.exit(1)
@@ -580,18 +582,18 @@ def main():
     args.name = args.name if args.name else args.source_path
     source_path = os.path.abspath(args.source_path)
 
-    if not config.SHARED_FILESYSTEM:
-      log.info(
-          'A Cloud Only Architecture has been detected. '
-          'Compressing the directory for GCS upload.')
-      source_path = archive.CompressDirectory(
-          source_path, output_path=config.TMP_DIR)
-      args.name = args.name if args.name else source_path
-      evidence_ = evidence.CompressedDirectory(
-          name=args.name, source_path=source_path, source=args.source)
-    else:
-      evidence_ = evidence.Directory(
-          name=args.name, source_path=source_path, source=args.source)
+    ### if not config.SHARED_FILESYSTEM:
+    #   log.info(
+    #       'A Cloud Only Architecture has been detected. '
+    #       'Compressing the directory for GCS upload.')
+    #   source_path = archive.CompressDirectory(
+    #       source_path, output_path=config.TMP_DIR)
+    #   args.name = args.name if args.name else source_path
+    #   evidence_ = evidence.CompressedDirectory(
+    #       name=args.name, source_path=source_path, source=args.source)
+    # else:
+    evidence_ = evidence.Directory(
+        name=args.name, source_path=source_path, source=args.source)
   elif args.command == 'compresseddirectory':
     archive.ValidateTarFile(args.source_path)
     args.name = args.name if args.name else args.source_path
@@ -631,13 +633,13 @@ def main():
     evidence_ = evidence.RawMemory(
         name=args.name, source_path=source_path, profile=args.profile,
         module_list=args.module_list)
-  elif args.command == 'psqworker':
-    # Set up root logger level which is normally set by the psqworker command
-    # which we are bypassing.
-    logger.setup()
-    worker = TurbiniaPsqWorker(
-        jobs_denylist=args.jobs_denylist, jobs_allowlist=args.jobs_allowlist)
-    worker.start()
+  ### elif args.command == 'psqworker':
+  #   # Set up root logger level which is normally set by the psqworker command
+  #   # which we are bypassing.
+  #   logger.setup()
+  #   worker = TurbiniaPsqWorker(
+  #       jobs_denylist=args.jobs_denylist, jobs_allowlist=args.jobs_allowlist)
+  #   worker.start()
   elif args.command == 'celeryworker':
     logger.setup()
     worker = TurbiniaCeleryWorker(
@@ -719,99 +721,99 @@ def main():
   elif args.command == 'listjobs':
     log.info('Available Jobs:')
     client.list_jobs()
-  elif args.command == 'gcplogs':
-    if not config.STACKDRIVER_LOGGING:
-      log.error('Stackdriver logging must be enabled in order to use this.')
-      sys.exit(1)
-    if args.output_dir and not os.path.isdir(args.output_dir):
-      log.error('Please provide a valid directory path.')
-      sys.exit(1)
-    query = None
-    if args.query:
-      query = args.query
-    if args.worker_logs:
-      if query:
-        query = 'jsonPayload.origin="psqworker" {0:s}'.format(query)
-      else:
-        query = 'jsonPayload.origin="psqworker"'
-    if args.server_logs:
-      if query:
-        query = 'jsonPayload.origin="server" {0:s}'.format(query)
-      else:
-        query = 'jsonPayload.origin="server"'
-    google_cloud.get_logs(
-        config.TURBINIA_PROJECT, args.output_dir, args.days_history, query)
-  elif args.command == 'dumpgcs':
-    if not config.GCS_OUTPUT_PATH and not args.bucket:
-      log.error('GCS storage must be enabled in order to use this.')
-      sys.exit(1)
-    if not args.task_id and not args.request_id:
-      log.error('You must specify one of task_id or request_id.')
-      sys.exit(1)
-    if not os.path.isdir(args.output_dir):
-      log.error('Please provide a valid directory path.')
-      sys.exit(1)
+  ### elif args.command == 'gcplogs':
+  #   if not config.STACKDRIVER_LOGGING:
+  #     log.error('Stackdriver logging must be enabled in order to use this.')
+  #     sys.exit(1)
+  #   if args.output_dir and not os.path.isdir(args.output_dir):
+  #     log.error('Please provide a valid directory path.')
+  #     sys.exit(1)
+  #   query = None
+  #   if args.query:
+  #     query = args.query
+  #   if args.worker_logs:
+  #     if query:
+  #       query = 'jsonPayload.origin="psqworker" {0:s}'.format(query)
+  #     else:
+  #       query = 'jsonPayload.origin="psqworker"'
+  #   if args.server_logs:
+  #     if query:
+  #       query = 'jsonPayload.origin="server" {0:s}'.format(query)
+  #     else:
+  #       query = 'jsonPayload.origin="server"'
+  #   google_cloud.get_logs(
+  #       config.TURBINIA_PROJECT, args.output_dir, args.days_history, query)
+  ### elif args.command == 'dumpgcs':
+  #   if not config.GCS_OUTPUT_PATH and not args.bucket:
+  #     log.error('GCS storage must be enabled in order to use this.')
+  #     sys.exit(1)
+  #   if not args.task_id and not args.request_id:
+  #     log.error('You must specify one of task_id or request_id.')
+  #     sys.exit(1)
+  #   if not os.path.isdir(args.output_dir):
+  #     log.error('Please provide a valid directory path.')
+  #     sys.exit(1)
 
-    gcs_bucket = args.bucket if args.bucket else config.GCS_OUTPUT_PATH
-    instance_id = args.instance_id if args.instance_id else config.INSTANCE_ID
+  #   gcs_bucket = args.bucket if args.bucket else config.GCS_OUTPUT_PATH
+  #   instance_id = args.instance_id if args.instance_id else config.INSTANCE_ID
 
-    try:
-      task_data = client.get_task_data(
-          instance=instance_id, days=args.days_history,
-          project=config.TURBINIA_PROJECT, region=config.TURBINIA_REGION,
-          task_id=args.task_id, request_id=args.request_id,
-          function_name='gettasks')
-      output_writer = GCSOutputWriter(
-          gcs_bucket, local_output_dir=args.output_dir)
-      if not task_data:
-        log.error('No Tasks found for task/request ID')
-        sys.exit(1)
-      if args.task_id:
-        log.info(
-            'Downloading GCS files for task_id {0:s} to {1:s}.'.format(
-                args.task_id, args.output_dir))
-        for task in task_data:
-          if task['id'] == args.task_id:
-            if task['saved_paths']:
-              output_writer.copy_from_gcs(task['saved_paths'])
-      if args.request_id:
-        log.info(
-            'Downloading GCS files for request_id {0:s} to {1:s}.'.format(
-                args.request_id, args.output_dir))
-        paths = []
-        for task in task_data:
-          if task['saved_paths']:
-            paths.extend(task['saved_paths'])
-        output_writer.copy_from_gcs(paths)
+  #   try:
+  #     task_data = client.get_task_data(
+  #         instance=instance_id, days=args.days_history,
+  #         project=config.TURBINIA_PROJECT, region=config.TURBINIA_REGION,
+  #         task_id=args.task_id, request_id=args.request_id,
+  #         function_name='gettasks')
+  #     output_writer = GCSOutputWriter(
+  #         gcs_bucket, local_output_dir=args.output_dir)
+  #     if not task_data:
+  #       log.error('No Tasks found for task/request ID')
+  #       sys.exit(1)
+  #     if args.task_id:
+  #       log.info(
+  #           'Downloading GCS files for task_id {0:s} to {1:s}.'.format(
+  #               args.task_id, args.output_dir))
+  #       for task in task_data:
+  #         if task['id'] == args.task_id:
+  #           if task['saved_paths']:
+  #             output_writer.copy_from_gcs(task['saved_paths'])
+  #     if args.request_id:
+  #       log.info(
+  #           'Downloading GCS files for request_id {0:s} to {1:s}.'.format(
+  #               args.request_id, args.output_dir))
+  #       paths = []
+  #       for task in task_data:
+  #         if task['saved_paths']:
+  #           paths.extend(task['saved_paths'])
+  #       output_writer.copy_from_gcs(paths)
 
-    except TurbiniaException as exception:
-      log.error('Failed to pull the data {0!s}'.format(exception))
+  #   except TurbiniaException as exception:
+  #     log.error('Failed to pull the data {0!s}'.format(exception))
   else:
     log.warning('Command {0!s} not implemented.'.format(args.command))
 
-  if evidence_ and not args.force_evidence:
-    if config.SHARED_FILESYSTEM and evidence_.cloud_only:
-      log.error(
-          'The evidence type {0:s} is Cloud only, and this instance of '
-          'Turbinia is not a cloud instance.'.format(evidence_.type))
-      sys.exit(1)
-    elif not config.SHARED_FILESYSTEM and evidence_.copyable:
-      if os.path.exists(evidence_.local_path):
-        output_manager = OutputManager()
-        output_manager.setup(evidence_.type, request_id, remote_only=True)
-        output_manager.save_evidence(evidence_)
-      else:
-        log.error(
-            'The evidence local path does not exist: {0:s}. Please submit '
-            'a new Request with a valid path.'.format(evidence_.local_path))
-        sys.exit(1)
-    elif not config.SHARED_FILESYSTEM and not evidence_.cloud_only:
-      log.error(
-          'The evidence type {0:s} cannot run on Cloud instances of '
-          'Turbinia. Consider wrapping it in a '
-          'GoogleCloudDiskRawEmbedded or other Cloud compatible '
-          'object'.format(evidence_.type))
-      sys.exit(1)
+  ###if evidence_ and not args.force_evidence:
+    # if config.SHARED_FILESYSTEM and evidence_.cloud_only:
+    #   log.error(
+    #       'The evidence type {0:s} is Cloud only, and this instance of '
+    #       'Turbinia is not a cloud instance.'.format(evidence_.type))
+    #   sys.exit(1)
+    # elif not config.SHARED_FILESYSTEM and evidence_.copyable:
+    #   if os.path.exists(evidence_.local_path):
+    #     output_manager = OutputManager()
+    #     output_manager.setup(evidence_.type, request_id, remote_only=True)
+    #     output_manager.save_evidence(evidence_)
+    #   else:
+    #     log.error(
+    #         'The evidence local path does not exist: {0:s}. Please submit '
+    #         'a new Request with a valid path.'.format(evidence_.local_path))
+    #     sys.exit(1)
+    # elif not config.SHARED_FILESYSTEM and not evidence_.cloud_only:
+    #   log.error(
+    #       'The evidence type {0:s} cannot run on Cloud instances of '
+    #       'Turbinia. Consider wrapping it in a '
+    #       'GoogleCloudDiskRawEmbedded or other Cloud compatible '
+    #       'object'.format(evidence_.type))
+    #   sys.exit(1)
 
   # If we have evidence to process and we also want to run as a server, then
   # we'll just process the evidence directly rather than send it through the

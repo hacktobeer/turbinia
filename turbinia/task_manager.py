@@ -30,23 +30,23 @@ from turbinia import TurbiniaException
 from turbinia.jobs import manager as jobs_manager
 
 config.LoadConfig()
-if config.TASK_MANAGER.lower() == 'psq':
-  import psq
+###if config.TASK_MANAGER.lower() == 'psq':
+  # import psq
 
-  from google.cloud import exceptions
-  from google.cloud import datastore
-  from google.cloud import pubsub
+  # from google.cloud import exceptions
+  # from google.cloud import datastore
+  # from google.cloud import pubsub
 
-  from turbinia import pubsub as turbinia_pubsub
-elif config.TASK_MANAGER.lower() == 'celery':
+  # from turbinia import pubsub as turbinia_pubsub
+if config.TASK_MANAGER.lower() == 'celery':
   from celery import states as celery_states
 
   from turbinia import tcelery as turbinia_celery
 
 log = logging.getLogger('turbinia')
 
-PSQ_TASK_TIMEOUT_SECONDS = 604800
-PSQ_QUEUE_WAIT_SECONDS = 2
+# PSQ_TASK_TIMEOUT_SECONDS = 604800
+# PSQ_QUEUE_WAIT_SECONDS = 2
 
 # Define metrics
 turbinia_server_tasks_total = Gauge(
@@ -72,9 +72,9 @@ def get_task_manager():
   """
   config.LoadConfig()
   # pylint: disable=no-else-return
-  if config.TASK_MANAGER.lower() == 'psq':
-    return PSQTaskManager()
-  elif config.TASK_MANAGER.lower() == 'celery':
+  # if config.TASK_MANAGER.lower() == 'psq':
+  #   return PSQTaskManager()
+  if config.TASK_MANAGER.lower() == 'celery':
     return CeleryTaskManager()
   else:
     msg = 'Task Manager type "{0:s}" not implemented'.format(
@@ -605,92 +605,92 @@ class CeleryTaskManager(BaseTaskManager):
         task.serialize(), evidence_.serialize())
 
 
-class PSQTaskManager(BaseTaskManager):
-  """PSQ implementation of BaseTaskManager.
+### class PSQTaskManager(BaseTaskManager):
+#   """PSQ implementation of BaseTaskManager.
 
-  Attributes:
-    psq: PSQ Queue object.
-    server_pubsub: A PubSubClient object for receiving new evidence messages.
-  """
+#   Attributes:
+#     psq: PSQ Queue object.
+#     server_pubsub: A PubSubClient object for receiving new evidence messages.
+#   """
 
-  def __init__(self):
-    self.psq = None
-    self.server_pubsub = None
-    config.LoadConfig()
-    super(PSQTaskManager, self).__init__()
+#   def __init__(self):
+#     self.psq = None
+#     self.server_pubsub = None
+#     config.LoadConfig()
+#     super(PSQTaskManager, self).__init__()
 
-  # pylint: disable=keyword-arg-before-vararg
-  def _backend_setup(self, server=True, *args, **kwargs):
-    """
-    Args:
-      server (bool): Whether this is the client or a server
+#   # pylint: disable=keyword-arg-before-vararg
+#   def _backend_setup(self, server=True, *args, **kwargs):
+#     """
+#     Args:
+#       server (bool): Whether this is the client or a server
 
-    Raises:
-      TurbiniaException: When there are errors creating PSQ Queue
-    """
+#     Raises:
+#       TurbiniaException: When there are errors creating PSQ Queue
+#     """
 
-    log.debug(
-        'Setting up PSQ Task Manager requirements on project {0:s}'.format(
-            config.TURBINIA_PROJECT))
-    self.server_pubsub = turbinia_pubsub.TurbiniaPubSub(config.PUBSUB_TOPIC)
-    if server:
-      self.server_pubsub.setup_subscriber()
-    else:
-      self.server_pubsub.setup_publisher()
-    psq_publisher = pubsub.PublisherClient()
-    psq_subscriber = pubsub.SubscriberClient()
-    datastore_client = datastore.Client(project=config.TURBINIA_PROJECT)
-    try:
-      self.psq = psq.Queue(
-          psq_publisher, psq_subscriber, config.TURBINIA_PROJECT,
-          name=config.PSQ_TOPIC, storage=psq.DatastoreStorage(datastore_client))
-    except exceptions.GoogleCloudError as e:
-      msg = 'Error creating PSQ Queue: {0:s}'.format(str(e))
-      log.error(msg)
-      raise turbinia.TurbiniaException(msg)
+#     log.debug(
+#         'Setting up PSQ Task Manager requirements on project {0:s}'.format(
+#             config.TURBINIA_PROJECT))
+#     self.server_pubsub = turbinia_pubsub.TurbiniaPubSub(config.PUBSUB_TOPIC)
+#     if server:
+#       self.server_pubsub.setup_subscriber()
+#     else:
+#       self.server_pubsub.setup_publisher()
+#     psq_publisher = pubsub.PublisherClient()
+#     psq_subscriber = pubsub.SubscriberClient()
+#     datastore_client = datastore.Client(project=config.TURBINIA_PROJECT)
+#     try:
+#       self.psq = psq.Queue(
+#           psq_publisher, psq_subscriber, config.TURBINIA_PROJECT,
+#           name=config.PSQ_TOPIC, storage=psq.DatastoreStorage(datastore_client))
+#     except exceptions.GoogleCloudError as e:
+#       msg = 'Error creating PSQ Queue: {0:s}'.format(str(e))
+#       log.error(msg)
+#       raise turbinia.TurbiniaException(msg)
 
-  def process_tasks(self):
-    completed_tasks = []
-    for task in self.tasks:
-      psq_task = task.stub.get_task()
-      # This handles tasks that have failed at the PSQ layer.
-      if not psq_task:
-        log.debug('Task {0:s} not yet created'.format(task.stub.task_id))
-      elif psq_task.status not in (psq.task.FINISHED, psq.task.FAILED):
-        log.debug('Task {0:s} not finished'.format(psq_task.id))
-      elif psq_task.status == psq.task.FAILED:
-        log.warning('Task {0:s} failed.'.format(psq_task.id))
-        completed_tasks.append(task)
-      else:
-        task.result = workers.TurbiniaTaskResult.deserialize(
-            task.stub.result(timeout=PSQ_TASK_TIMEOUT_SECONDS))
-        completed_tasks.append(task)
+#   def process_tasks(self):
+#     completed_tasks = []
+#     for task in self.tasks:
+#       psq_task = task.stub.get_task()
+#       # This handles tasks that have failed at the PSQ layer.
+#       if not psq_task:
+#         log.debug('Task {0:s} not yet created'.format(task.stub.task_id))
+#       elif psq_task.status not in (psq.task.FINISHED, psq.task.FAILED):
+#         log.debug('Task {0:s} not finished'.format(psq_task.id))
+#       elif psq_task.status == psq.task.FAILED:
+#         log.warning('Task {0:s} failed.'.format(psq_task.id))
+#         completed_tasks.append(task)
+#       else:
+#         task.result = workers.TurbiniaTaskResult.deserialize(
+#             task.stub.result(timeout=PSQ_TASK_TIMEOUT_SECONDS))
+#         completed_tasks.append(task)
 
-    outstanding_task_count = len(self.tasks) - len(completed_tasks)
-    if outstanding_task_count > 0:
-      log.info('{0:d} Tasks still outstanding.'.format(outstanding_task_count))
-    return completed_tasks
+#     outstanding_task_count = len(self.tasks) - len(completed_tasks)
+#     if outstanding_task_count > 0:
+#       log.info('{0:d} Tasks still outstanding.'.format(outstanding_task_count))
+#     return completed_tasks
 
-  def get_evidence(self):
-    requests = self.server_pubsub.check_messages()
-    evidence_list = []
-    for request in requests:
-      for evidence_ in request.evidence:
-        if not evidence_.request_id:
-          evidence_.request_id = request.request_id
-        evidence_.config = request.recipe
-        evidence_.config['requester'] = request.requester
-        log.info(
-            'Received evidence [{0:s}] from PubSub message.'.format(
-                str(evidence_)))
-        evidence_list.append(evidence_)
-      turbinia_server_request_total.inc()
-    return evidence_list
+#   def get_evidence(self):
+#     requests = self.server_pubsub.check_messages()
+#     evidence_list = []
+#     for request in requests:
+#       for evidence_ in request.evidence:
+#         if not evidence_.request_id:
+#           evidence_.request_id = request.request_id
+#         evidence_.config = request.recipe
+#         evidence_.config['requester'] = request.requester
+#         log.info(
+#             'Received evidence [{0:s}] from PubSub message.'.format(
+#                 str(evidence_)))
+#         evidence_list.append(evidence_)
+#       turbinia_server_request_total.inc()
+#     return evidence_list
 
-  def enqueue_task(self, task, evidence_):
-    log.info(
-        'Adding PSQ task {0:s} with evidence {1:s} to queue'.format(
-            task.name, evidence_.name))
-    task.stub = self.psq.enqueue(
-        task_runner, task.serialize(), evidence_.serialize())
-    time.sleep(PSQ_QUEUE_WAIT_SECONDS)
+#   def enqueue_task(self, task, evidence_):
+#     log.info(
+#         'Adding PSQ task {0:s} with evidence {1:s} to queue'.format(
+#             task.name, evidence_.name))
+#     task.stub = self.psq.enqueue(
+#         task_runner, task.serialize(), evidence_.serialize())
+#     time.sleep(PSQ_QUEUE_WAIT_SECONDS)

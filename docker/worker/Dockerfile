@@ -21,8 +21,8 @@ RUN apt-get update && apt-get -y install \
 
 ADD requirements.txt /tmp/
 RUN cd /tmp/ && pip3 install -r requirements.txt
-ADD dfvfs_requirements.txt /tmp/
-RUN cd /tmp/ && pip3 install -r dfvfs_requirements.txt
+#ADD dfvfs_requirements.txt /tmp/
+#RUN cd /tmp/ && pip3 install -r dfvfs_requirements.txt
 
 RUN pip3 install pip --upgrade
 RUN pip3 install keyrings.alt --upgrade

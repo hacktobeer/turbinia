@@ -29,9 +29,9 @@ from turbinia import config
 from turbinia import TurbiniaException
 
 config.LoadConfig()
-if config.GCS_OUTPUT_PATH and config.GCS_OUTPUT_PATH.lower() != 'none':
-  from google.cloud import storage
-  from google.cloud import exceptions
+### if config.GCS_OUTPUT_PATH and config.GCS_OUTPUT_PATH.lower() != 'none':
+#   from google.cloud import storage
+#   from google.cloud import exceptions
 
 log = logging.getLogger('turbinia')
 
@@ -74,11 +74,11 @@ class OutputManager:
       writers.append(writer)
       local_output_dir = writers[0].local_output_dir
 
-    if config.GCS_OUTPUT_PATH:
-      writer = GCSOutputWriter(
-          unique_dir=unique_dir, gcs_path=config.GCS_OUTPUT_PATH,
-          local_output_dir=local_output_dir)
-      writers.append(writer)
+    ### if config.GCS_OUTPUT_PATH:
+    #   writer = GCSOutputWriter(
+    #       unique_dir=unique_dir, gcs_path=config.GCS_OUTPUT_PATH,
+    #       local_output_dir=local_output_dir)
+    #   writers.append(writer)
     return writers
 
   def get_local_output_dirs(self):
@@ -386,161 +386,161 @@ class LocalOutputWriter(OutputWriter):
     return self._copy(source_file)
 
 
-class GCSOutputWriter(OutputWriter):
-  """Output writer for Google Cloud Storage.
+### class GCSOutputWriter(OutputWriter):
+#   """Output writer for Google Cloud Storage.
 
-  attributes:
-    bucket (string): Storage bucket to put output results into.
-    client (google.cloud.storage.Client): GCS Client
-  """
+#   attributes:
+#     bucket (string): Storage bucket to put output results into.
+#     client (google.cloud.storage.Client): GCS Client
+#   """
 
-  CHUNK_SIZE = 10 * (2**20)  # 10MB by default
+#   CHUNK_SIZE = 10 * (2**20)  # 10MB by default
 
-  NAME = 'GCSWriter'
+#   NAME = 'GCSWriter'
 
-  def __init__(self, gcs_path, *args, **kwargs):
-    """Initialization for GCSOutputWriter.
+#   def __init__(self, gcs_path, *args, **kwargs):
+#     """Initialization for GCSOutputWriter.
 
-    Args:
-      gcs_path (string): GCS path to put output results into.
-    """
-    super(GCSOutputWriter, self).__init__(*args, **kwargs)
-    config.LoadConfig()
-    self.client = storage.Client(project=config.TURBINIA_PROJECT)
+#     Args:
+#       gcs_path (string): GCS path to put output results into.
+#     """
+#     super(GCSOutputWriter, self).__init__(*args, **kwargs)
+#     config.LoadConfig()
+#     self.client = storage.Client(project=config.TURBINIA_PROJECT)
 
-    self.bucket, self.base_output_dir = self._parse_gcs_path(gcs_path)
+#     self.bucket, self.base_output_dir = self._parse_gcs_path(gcs_path)
 
-  @staticmethod
-  def _parse_gcs_path(file_):
-    """Get the bucket and path values from a GCS path.
+#   @staticmethod
+#   def _parse_gcs_path(file_):
+#     """Get the bucket and path values from a GCS path.
 
-    Args:
-      file_ (string): GCS file path.
+#     Args:
+#       file_ (string): GCS file path.
 
-    Returns:
-      A tuple of ((string) bucket, (string) path)
-    """
-    match = re.search(r'gs://(.*?)/(.*$)', file_)
-    if not match:
-      raise TurbiniaException(
-          'Cannot find bucket and path from GCS config {0:s}'.format(file_))
-    return match.group(1), match.group(2)
+#     Returns:
+#       A tuple of ((string) bucket, (string) path)
+#     """
+#     match = re.search(r'gs://(.*?)/(.*$)', file_)
+#     if not match:
+#       raise TurbiniaException(
+#           'Cannot find bucket and path from GCS config {0:s}'.format(file_))
+#     return match.group(1), match.group(2)
 
-  def create_output_dir(self, base_path=None):
-    # Directories in GCS are artificial, so any path can be written as part of
-    # the object name.
-    pass
+#   def create_output_dir(self, base_path=None):
+#     # Directories in GCS are artificial, so any path can be written as part of
+#     # the object name.
+#     pass
 
-  def copy_to(self, source_path):
-    if os.path.getsize(source_path) == 0:
-      message = (
-          'Local source file {0:s} is empty.  Not uploading to GCS'.format(
-              source_path))
-      log.warning(message)
-      return None
+#   def copy_to(self, source_path):
+#     if os.path.getsize(source_path) == 0:
+#       message = (
+#           'Local source file {0:s} is empty.  Not uploading to GCS'.format(
+#               source_path))
+#       log.warning(message)
+#       return None
 
-    bucket = self.client.get_bucket(self.bucket)
-    destination_path = os.path.join(
-        self.base_output_dir, self.unique_dir, os.path.basename(source_path))
-    log.info(
-        'Writing {0:s} to GCS path {1:s}'.format(source_path, destination_path))
-    try:
-      blob = storage.Blob(destination_path, bucket, chunk_size=self.CHUNK_SIZE)
-      blob.upload_from_filename(source_path, client=self.client)
-    except exceptions.GoogleCloudError as exception:
-      message = 'File upload to GCS failed: {0!s}'.format(exception)
-      log.error(message)
-      raise TurbiniaException(message)
-    return os.path.join('gs://', self.bucket, destination_path)
+#     bucket = self.client.get_bucket(self.bucket)
+#     destination_path = os.path.join(
+#         self.base_output_dir, self.unique_dir, os.path.basename(source_path))
+#     log.info(
+#         'Writing {0:s} to GCS path {1:s}'.format(source_path, destination_path))
+#     try:
+#       blob = storage.Blob(destination_path, bucket, chunk_size=self.CHUNK_SIZE)
+#       blob.upload_from_filename(source_path, client=self.client)
+#     except exceptions.GoogleCloudError as exception:
+#       message = 'File upload to GCS failed: {0!s}'.format(exception)
+#       log.error(message)
+#       raise TurbiniaException(message)
+#     return os.path.join('gs://', self.bucket, destination_path)
 
-  def copy_from(self, source_path):
-    """Copies output file from the managed location to the local output dir.
+#   def copy_from(self, source_path):
+#     """Copies output file from the managed location to the local output dir.
 
-    Args:
-      source_file (string): A path to a source file in the managed storage
-          location.  This path should be in a format matching the storage type
-          (e.g. GCS paths are formatted like 'gs://bucketfoo/' and local paths
-          are like '/foo/bar'.
+#     Args:
+#       source_file (string): A path to a source file in the managed storage
+#           location.  This path should be in a format matching the storage type
+#           (e.g. GCS paths are formatted like 'gs://bucketfoo/' and local paths
+#           are like '/foo/bar'.
 
-    Returns:
-      The path the file was saved to, or None if file was not written.
+#     Returns:
+#       The path the file was saved to, or None if file was not written.
 
-    Raises:
-      TurbiniaException: If file retrieval fails.
-    """
-    bucket = self.client.get_bucket(self.bucket)
-    gcs_path = self._parse_gcs_path(source_path)[1]
-    destination_path = os.path.join(
-        self.local_output_dir, os.path.basename(source_path))
-    log.info(
-        'Writing GCS file {0:s} to local path {1:s}'.format(
-            source_path, destination_path))
-    try:
-      blob = storage.Blob(gcs_path, bucket, chunk_size=self.CHUNK_SIZE)
-      blob.download_to_filename(destination_path, client=self.client)
-    except exceptions.RequestRangeNotSatisfiable as exception:
-      message = (
-          'File retrieval from GCS failed, file may be empty: {0!s}'.format(
-              exception))
-      log.error(message)
-      raise TurbiniaException(message)
-    except exceptions.GoogleCloudError as exception:
-      message = 'File retrieval from GCS failed: {0!s}'.format(exception)
-      log.error(message)
-      raise TurbiniaException(message)
+#     Raises:
+#       TurbiniaException: If file retrieval fails.
+#     """
+#     bucket = self.client.get_bucket(self.bucket)
+#     gcs_path = self._parse_gcs_path(source_path)[1]
+#     destination_path = os.path.join(
+#         self.local_output_dir, os.path.basename(source_path))
+#     log.info(
+#         'Writing GCS file {0:s} to local path {1:s}'.format(
+#             source_path, destination_path))
+#     try:
+#       blob = storage.Blob(gcs_path, bucket, chunk_size=self.CHUNK_SIZE)
+#       blob.download_to_filename(destination_path, client=self.client)
+#     except exceptions.RequestRangeNotSatisfiable as exception:
+#       message = (
+#           'File retrieval from GCS failed, file may be empty: {0!s}'.format(
+#               exception))
+#       log.error(message)
+#       raise TurbiniaException(message)
+#     except exceptions.GoogleCloudError as exception:
+#       message = 'File retrieval from GCS failed: {0!s}'.format(exception)
+#       log.error(message)
+#       raise TurbiniaException(message)
 
-    if not os.path.exists(destination_path):
-      message = (
-          'File retrieval from GCS failed: Local file {0:s} does not '
-          'exist'.format(destination_path))
-      log.error(message)
-      raise TurbiniaException(message)
-    return destination_path
+#     if not os.path.exists(destination_path):
+#       message = (
+#           'File retrieval from GCS failed: Local file {0:s} does not '
+#           'exist'.format(destination_path))
+#       log.error(message)
+#       raise TurbiniaException(message)
+#     return destination_path
 
-  def copy_from_gcs(self, saved_paths):
-    """Copies output file from the managed location to the local output dir.
+#   def copy_from_gcs(self, saved_paths):
+#     """Copies output file from the managed location to the local output dir.
 
-    Args:
-      saved_paths (list): A list of saved paths. List includes GCS and local
-      output file paths.
+#     Args:
+#       saved_paths (list): A list of saved paths. List includes GCS and local
+#       output file paths.
 
-    Raises:
-      TurbiniaException: If file retrieval fails.
-    """
-    bucket = self.client.get_bucket(self.bucket)
+#     Raises:
+#       TurbiniaException: If file retrieval fails.
+#     """
+#     bucket = self.client.get_bucket(self.bucket)
 
-    for path in saved_paths:
-      if 'gs://' in path:
-        gcs_path = self._parse_gcs_path(path)[1]
+#     for path in saved_paths:
+#       if 'gs://' in path:
+#         gcs_path = self._parse_gcs_path(path)[1]
 
-        try:
-          # Reconstruct the same file structure as GCS on the output dir
-          path_split = gcs_path.split('/')
-          directory = os.path.join(*path_split[0:-1])
-          destination_path = os.path.join(self.local_output_dir, directory)
-          Path(destination_path).mkdir(parents=True, exist_ok=True)
-          if not os.path.exists(destination_path):
-            message = (
-                'Failed to create the file path {0:s}.'.format(
-                    destination_path))
-            log.error(message)
-            raise TurbiniaException(message)
+#         try:
+#           # Reconstruct the same file structure as GCS on the output dir
+#           path_split = gcs_path.split('/')
+#           directory = os.path.join(*path_split[0:-1])
+#           destination_path = os.path.join(self.local_output_dir, directory)
+#           Path(destination_path).mkdir(parents=True, exist_ok=True)
+#           if not os.path.exists(destination_path):
+#             message = (
+#                 'Failed to create the file path {0:s}.'.format(
+#                     destination_path))
+#             log.error(message)
+#             raise TurbiniaException(message)
 
-          file_name = os.path.join(destination_path, path_split[-1])
+#           file_name = os.path.join(destination_path, path_split[-1])
 
-          # Get the file from GCS
-          blob = storage.Blob(gcs_path, bucket, chunk_size=self.CHUNK_SIZE)
-          blob.download_to_filename(file_name, client=self.client)
-          log.info('Downloaded {0:s} to {1:s}.'.format(path, file_name))
-        except exceptions.RequestRangeNotSatisfiable as exception:
-          message = (
-              'File retrieval from GCS failed, file may be empty: {0!s}'.format(
-                  exception))
-          log.error(message)
-          raise TurbiniaException(message)
-        except exceptions.GoogleCloudError as exception:
-          message = 'File retrieval from GCS failed: {0!s}'.format(exception)
-          log.error(message)
-          raise TurbiniaException(message)
+#           # Get the file from GCS
+#           blob = storage.Blob(gcs_path, bucket, chunk_size=self.CHUNK_SIZE)
+#           blob.download_to_filename(file_name, client=self.client)
+#           log.info('Downloaded {0:s} to {1:s}.'.format(path, file_name))
+#         except exceptions.RequestRangeNotSatisfiable as exception:
+#           message = (
+#               'File retrieval from GCS failed, file may be empty: {0!s}'.format(
+#                   exception))
+#           log.error(message)
+#           raise TurbiniaException(message)
+#         except exceptions.GoogleCloudError as exception:
+#           message = 'File retrieval from GCS failed: {0!s}'.format(exception)
+#           log.error(message)
+#           raise TurbiniaException(message)
 
-    return
+#     return

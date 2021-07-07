@@ -33,11 +33,11 @@ from turbinia.config import DATETIME_FORMAT
 from turbinia import TurbiniaException
 
 config.LoadConfig()
-if config.STATE_MANAGER.lower() == 'datastore':
-  from google.cloud import datastore
-  from google.cloud import exceptions
-  from google.auth import exceptions as auth_exceptions
-elif config.STATE_MANAGER.lower() == 'redis':
+### if config.STATE_MANAGER.lower() == 'datastore':
+#   from google.cloud import datastore
+#   from google.cloud import exceptions
+#   from google.auth import exceptions as auth_exceptions
+if config.STATE_MANAGER.lower() == 'redis':
   import redis
 else:
   msg = 'State Manager type "{0:s}" not implemented'.format(
@@ -59,9 +59,9 @@ def get_state_manager():
   """
   config.LoadConfig()
   # pylint: disable=no-else-return
-  if config.STATE_MANAGER.lower() == 'datastore':
-    return DatastoreStateManager()
-  elif config.STATE_MANAGER.lower() == 'redis':
+  # if config.STATE_MANAGER.lower() == 'datastore':
+  #   return DatastoreStateManager()
+  if config.STATE_MANAGER.lower() == 'redis':
     return RedisStateManager()
   else:
     msg = 'State Manager type "{0:s}" not implemented'.format(
@@ -160,68 +160,68 @@ class BaseStateManager:
     raise NotImplementedError
 
 
-class DatastoreStateManager(BaseStateManager):
-  """Datastore State Manager.
+### class DatastoreStateManager(BaseStateManager):
+#   """Datastore State Manager.
 
-  Attributes:
-    client: A Datastore client object.
-  """
+#   Attributes:
+#     client: A Datastore client object.
+#   """
 
-  def __init__(self):
-    config.LoadConfig()
-    try:
-      self.client = datastore.Client(project=config.TURBINIA_PROJECT)
-    except (EnvironmentError, auth_exceptions.DefaultCredentialsError) as e:
-      message = (
-          'Could not create Datastore client: {0!s}\n'
-          'Have you run $ gcloud auth application-default login?'.format(e))
-      raise TurbiniaException(message)
+#   def __init__(self):
+#     config.LoadConfig()
+#     try:
+#       self.client = datastore.Client(project=config.TURBINIA_PROJECT)
+#     except (EnvironmentError, auth_exceptions.DefaultCredentialsError) as e:
+#       message = (
+#           'Could not create Datastore client: {0!s}\n'
+#           'Have you run $ gcloud auth application-default login?'.format(e))
+#       raise TurbiniaException(message)
 
-  def _validate_data(self, data):
-    for key, value in iter(data.items()):
-      if (isinstance(value, six.string_types) and
-          len(value) >= MAX_DATASTORE_STRLEN):
-        log.warning(
-            'Warning: key {0:s} with value {1:s} is longer than {2:d} bytes. '
-            'Truncating in order to fit in Datastore.'.format(
-                key, value, MAX_DATASTORE_STRLEN))
-        suffix = '[...]'
-        data[key] = value[:MAX_DATASTORE_STRLEN - len(suffix)] + suffix
+#   def _validate_data(self, data):
+#     for key, value in iter(data.items()):
+#       if (isinstance(value, six.string_types) and
+#           len(value) >= MAX_DATASTORE_STRLEN):
+#         log.warning(
+#             'Warning: key {0:s} with value {1:s} is longer than {2:d} bytes. '
+#             'Truncating in order to fit in Datastore.'.format(
+#                 key, value, MAX_DATASTORE_STRLEN))
+#         suffix = '[...]'
+#         data[key] = value[:MAX_DATASTORE_STRLEN - len(suffix)] + suffix
 
-    return data
+#     return data
 
-  def update_task(self, task):
-    task.touch()
-    try:
-      with self.client.transaction():
-        entity = self.client.get(task.state_key)
-        if not entity:
-          self.write_new_task(task)
-          return
-        entity.update(self.get_task_dict(task))
-        log.debug('Updating Task {0:s} in Datastore'.format(task.name))
-        self.client.put(entity)
-    except exceptions.GoogleCloudError as e:
-      log.error(
-          'Failed to update task {0:s} in datastore: {1!s}'.format(
-              task.name, e))
+#   def update_task(self, task):
+#     task.touch()
+#     try:
+#       with self.client.transaction():
+#         entity = self.client.get(task.state_key)
+#         if not entity:
+#           self.write_new_task(task)
+#           return
+#         entity.update(self.get_task_dict(task))
+#         log.debug('Updating Task {0:s} in Datastore'.format(task.name))
+#         self.client.put(entity)
+#     except exceptions.GoogleCloudError as e:
+#       log.error(
+#           'Failed to update task {0:s} in datastore: {1!s}'.format(
+#               task.name, e))
 
-  def write_new_task(self, task):
-    key = self.client.key('TurbiniaTask', task.id)
-    try:
-      entity = datastore.Entity(key)
-      task_data = self.get_task_dict(task)
-      task_data['status'] = 'Task scheduled at {0:s}'.format(
-          datetime.now().strftime(DATETIME_FORMAT))
-      entity.update(task_data)
-      log.info('Writing new task {0:s} into Datastore'.format(task.name))
-      self.client.put(entity)
-      task.state_key = key
-    except exceptions.GoogleCloudError as e:
-      log.error(
-          'Failed to update task {0:s} in datastore: {1!s}'.format(
-              task.name, e))
-    return key
+#   def write_new_task(self, task):
+#     key = self.client.key('TurbiniaTask', task.id)
+#     try:
+#       entity = datastore.Entity(key)
+#       task_data = self.get_task_dict(task)
+#       task_data['status'] = 'Task scheduled at {0:s}'.format(
+#           datetime.now().strftime(DATETIME_FORMAT))
+#       entity.update(task_data)
+#       log.info('Writing new task {0:s} into Datastore'.format(task.name))
+#       self.client.put(entity)
+#       task.state_key = key
+#     except exceptions.GoogleCloudError as e:
+#       log.error(
+#           'Failed to update task {0:s} in datastore: {1!s}'.format(
+#               task.name, e))
+#     return key
 
 
 class RedisStateManager(BaseStateManager):
