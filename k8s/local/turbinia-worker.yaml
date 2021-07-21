@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: turbinia-worker
+  labels:
+    app: turbinia-worker
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: turbinia-worker
+  template:
+    metadata:
+      labels:
+        app: turbinia-worker
+    spec:
+      initContainers:
+      - name: init-filestore
+        image: busybox:1.28
+        command: ['sh', '-c', 'chmod go+w /mnt/criticalvolume']
+        volumeMounts:
+        - mountPath: "/mnt/criticalvolume"
+          name: criticalvolume
+      containers:
+      - name: worker
+        #image: us-docker.pkg.dev/osdfir-registry/turbinia/release/turbinia-worker:latest
+        image: rbdebeer/turbinia-worker-dev 
+        securityContext:
+          privileged: true
+        env:
+        - name: TURBINIA_CONF
+          valueFrom:
+            configMapKeyRef:
+              name: turbinia-config
+              key: TURBINIA_CONF
+        volumeMounts:
+        - mountPath: /mnt/criticalvolume
+          name: criticalvolume
+        - mountPath: "/dev"
+          name: dev
+          readOnly: true 
+        ports:
+          - containerPort: 9200
+        resources: #TODO adjust for GKE
+          requests:
+           memory: "256Mi"
+           cpu: "500m"
+          limits:
+           memory: "4096Mi"
+           cpu: "2000m"
+      volumes:
+      - name: criticalvolume
+        persistentVolumeClaim:
+          claimName: criticalvolume-claim
+          readOnly: false
+      - name: dev
+        hostPath:
+          path: /dev
