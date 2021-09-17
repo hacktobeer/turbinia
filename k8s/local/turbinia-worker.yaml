@@ -14,6 +14,7 @@ spec:
       labels:
         app: turbinia-worker
     spec:
+      terminationGracePeriodSeconds: 50000
       initContainers:
       - name: init-filestore
         image: busybox:1.28
@@ -23,8 +24,12 @@ spec:
           name: criticalvolume
       containers:
       - name: worker
-        #image: us-docker.pkg.dev/osdfir-registry/turbinia/release/turbinia-worker:latest
-        image: rbdebeer/turbinia-worker-dev 
+        image: us-docker.pkg.dev/osdfir-registry/turbinia/release/turbinia-worker-dev:latest
+        #image: rbdebeer/turbinia-worker-dev 
+        lifecycle:
+          preStop:
+            exec:
+              command: ["touch", "/tmp/turbinia-to-delete.lock"]
         securityContext:
           privileged: true
         env:
@@ -33,6 +38,8 @@ spec:
             configMapKeyRef:
               name: turbinia-config
               key: TURBINIA_CONF
+        - name: TURBINIA_EXTRA_ARGS
+          value: "-d"
         volumeMounts:
         - mountPath: /mnt/criticalvolume
           name: criticalvolume
@@ -46,8 +53,8 @@ spec:
            memory: "256Mi"
            cpu: "500m"
           limits:
-           memory: "4096Mi"
-           cpu: "2000m"
+           memory: "8192Mi"
+           cpu: "32000m"
       volumes:
       - name: criticalvolume
         persistentVolumeClaim:

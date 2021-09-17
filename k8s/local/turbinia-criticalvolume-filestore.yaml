@@ -9,4 +9,4 @@ spec:
   - ReadWriteMany
   nfs:
     path: /criticalvolume
-    server: 10.211.209.194  # GCP project:turbiniang-dev
+    server: 10.74.102.146  # GCP project:turbiniang-k8s
