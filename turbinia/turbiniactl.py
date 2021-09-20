@@ -429,9 +429,9 @@ def main():
   if args.debug_tasks:
     config.DEBUG_TASKS = True
 
-  if config.TASK_MANAGER == 'PSQ':
-    from turbinia.lib import google_cloud
-    from libcloudforensics.providers.gcp import forensics as gcp_forensics
+  #if config.TASK_MANAGER == 'PSQ':
+  from turbinia.lib import google_cloud
+  from libcloudforensics.providers.gcp import forensics as gcp_forensics
 
   # Enable GCP Stackdriver Logging
   if config.STACKDRIVER_LOGGING and args.command in ('server', 'psqworker'):
@@ -772,12 +772,12 @@ def main():
     log.warning('Command {0!s} not implemented.'.format(args.command))
 
   if evidence_ and not args.force_evidence:
-    if config.SHARED_FILESYSTEM and evidence_.cloud_only:
-      log.error(
-          'The evidence type {0:s} is Cloud only, and this instance of '
-          'Turbinia is not a cloud instance.'.format(evidence_.type))
-      sys.exit(1)
-    elif not config.SHARED_FILESYSTEM and evidence_.copyable:
+    # if config.SHARED_FILESYSTEM and evidence_.cloud_only:
+    #   log.error(
+    #       'The evidence type {0:s} is Cloud only, and this instance of '
+    #       'Turbinia is not a cloud instance.'.format(evidence_.type))
+    #  sys.exit(1)
+    if not config.SHARED_FILESYSTEM and evidence_.copyable:
       if os.path.exists(evidence_.local_path):
         output_manager = OutputManager()
         output_manager.setup(evidence_.type, request_id, remote_only=True)

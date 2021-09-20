@@ -5,12 +5,15 @@ metadata:
   labels:
     app: turbinia-worker
 spec:
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
       app: turbinia-worker
   template:
     metadata:
+      annotations:
+        prometheus.io/port: 9200
+        prometheus.io/scrape: true
       labels:
         app: turbinia-worker
     spec:
@@ -24,8 +27,8 @@ spec:
           name: criticalvolume
       containers:
       - name: worker
-        image: us-docker.pkg.dev/osdfir-registry/turbinia/release/turbinia-worker-dev:latest
-        #image: rbdebeer/turbinia-worker-dev 
+        #image: us-docker.pkg.dev/osdfir-registry/turbinia/release/turbinia-worker-dev:latest
+        image: rbdebeer/turbinia-worker-dev 
         lifecycle:
           preStop:
             exec:
@@ -46,6 +49,9 @@ spec:
         - mountPath: "/dev"
           name: dev
           readOnly: true 
+        - mountPath: "/tmp/resources"
+          name: resources
+          readOnly: false
         ports:
           - containerPort: 9200
         resources: #TODO adjust for GKE
@@ -63,3 +69,6 @@ spec:
       - name: dev
         hostPath:
           path: /dev
+      - name: resources
+        hostPath:
+          path: /tmp/resources

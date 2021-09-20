@@ -106,9 +106,9 @@ TASK_MAP = {
 }
 
 config.LoadConfig()
-if config.TASK_MANAGER.lower() == 'psq':
-  from libcloudforensics.providers.gcp.internal import function as gcp_function
-elif config.TASK_MANAGER.lower() == 'celery':
+#if config.TASK_MANAGER.lower() == 'psq':
+from libcloudforensics.providers.gcp.internal import function as gcp_function
+if config.TASK_MANAGER.lower() == 'celery':
   from turbinia.state_manager import RedisStateManager
 
 log = logging.getLogger('turbinia')
