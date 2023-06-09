@@ -132,5 +132,6 @@ class BulkExtractorTaskTest(TestTurbiniaTaskBase):
     self.assertEqual(features_report_sample, report)
     self.assertEqual(features_summary_sample, summary)
 
+
 if __name__ == '__main__':
   unittest.main()
