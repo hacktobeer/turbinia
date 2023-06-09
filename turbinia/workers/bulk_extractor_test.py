@@ -91,6 +91,46 @@ class BulkExtractorTaskTest(TestTurbiniaTaskBase):
     self.assertEqual(empty_report_sample, report)
     self.assertEqual(summary_sample, summary)
 
+    features_report_sample = textwrap.dedent(
+        """\
+        #### Bulk Extractor Results
+        ##### Run Summary
+        * Program: BULK_EXTRACTOR - 1.6.0-dev
+        * Command Line: bulk_extractor /tmp/test-small.img -o /output/test-small.img
+        * Start Time: 2019-09-27T16:34:48Z
+        * Elapsed Time: N/A
+        ##### Scanner Results
+        * domain:18
+        * email:1
+        * gps:0""")
+
+    features_summary_sample = "19 artifacts have been extracted."
+
+    xml_sample_features = textwrap.dedent(
+        """\
+        <dfxml xmloutputversion="1.0">
+        <creator version="1.0">
+          <program>BULK_EXTRACTOR</program>
+          <version>1.6.0-dev</version>
+          <execution_environment>
+            <command_line>bulk_extractor /tmp/test-small.img -o /output/test-small.img</command_line>
+            <start_time>2019-09-27T16:34:48Z</start_time>
+          </execution_environment>
+        </creator>
+        <feature_files>
+        <feature_file><name>domain</name><count>18</count></feature_file>
+        <feature_file><name>email</name><count>1</count></feature_file>
+        <feature_file><name>gps</name><count>0</count></feature_file>
+        </feature_files>
+        </dfxml>""")
+
+    str_io = StringIO(xml_sample_features)
+    mock_path.join.return_value = str_io
+    mock_path.exists.return_value = True
+    (report, summary) = self.task.generate_summary_report(str_io)
+    print(report)
+    self.assertEqual(features_report_sample, report)
+    self.assertEqual(features_summary_sample, summary)
 
 if __name__ == '__main__':
   unittest.main()
