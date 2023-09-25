@@ -17,7 +17,7 @@ spec:
       labels:
         app: turbinia-server
     spec:
-      serviceAccountName: turbinia
+      #serviceAccountName: turbinia
       initContainers:
         - name: init-filestore
           image: busybox:1.28
@@ -43,16 +43,24 @@ spec:
           volumeMounts:
             - mountPath: /mnt/turbiniavolume
               name: turbiniavolume
+            - mountPath: /etc/turbinia
+              name: config-volume
           ports:
             - containerPort: 9200
-          resources: 
-            requests:
-              memory: "256Mi"
-              cpu: "500m"
-            limits:
-              memory: "8192Mi"
-              cpu: "4000m"
+          # resources: 
+          #   requests:
+          #     memory: "256Mi"
+          #     cpu: "500m"
+          #   limits:
+          #     memory: "8192Mi"
+          #     cpu: "4000m"
       volumes:
+        - name: config-volume
+          configMap:
+            name: turbinia-config
+            items:
+            - key: TURBINIA_CONF
+              path: turbinia.conf
         - name: turbiniavolume
           persistentVolumeClaim:
             claimName: turbiniavolume-claim

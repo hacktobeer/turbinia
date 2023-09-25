@@ -5,7 +5,7 @@ metadata:
   labels:
     app: turbinia-worker
 spec:
-  replicas: 5
+  replicas: 1
   selector:
     matchLabels:
       app: turbinia-worker
@@ -17,7 +17,7 @@ spec:
       labels:
         app: turbinia-worker
     spec:
-      serviceAccountName: turbinia
+      #serviceAccountName: turbinia
       # The grace period needs to be set to the largest task timeout as
       # set in the turbinia configuration file.
       terminationGracePeriodSeconds: 86400
@@ -31,15 +31,15 @@ spec:
       containers:
         - name: worker
           image: us-docker.pkg.dev/osdfir-registry/turbinia/release/turbinia-worker:latest
-          lifecycle:
-            preStop:
-              exec:
-                command:
-                  - "/bin/sh"
-                  - "-c"
-                  - "touch /tmp/turbinia-to-scaledown.lock && sleep 5 && /usr/bin/python3 /home/turbinia/check-lockfile.py"
-          securityContext:
-            privileged: true
+          # lifecycle:
+          #   preStop:
+          #     exec:
+          #       command:
+          #         - "/bin/sh"
+          #         - "-c"
+          #         - "touch /tmp/turbinia-to-scaledown.lock && sleep 5 && /usr/bin/python3 /home/turbinia/check-lockfile.py"
+          # securityContext:
+          #   privileged: true
           env:
             - name: TURBINIA_CONF
               valueFrom:
@@ -53,24 +53,32 @@ spec:
                 fieldRef:
                   fieldPath: spec.nodeName
           volumeMounts:
-            - mountPath: "/dev"
-              name: dev
-              readOnly: true
-            - mountPath: "/var/run/lock"
-              name: lockfolder
-              readOnly: false
+            # - mountPath: "/dev"
+            #   name: dev
+            #   readOnly: true
+            # - mountPath: "/var/run/lock"
+            #   name: lockfolder
+            #   readOnly: false
             - mountPath: /mnt/turbiniavolume
               name: turbiniavolume
+            - mountPath: /etc/turbinia
+              name: config-volume
           ports:
             - containerPort: 9200
-          resources: 
-            requests:
-              memory: "2048Mi"
-              cpu: "1500m"
-            limits:
-              memory: "65536Mi"
-              cpu: "31000m"
+          # resources: 
+          #   requests:
+          #     memory: "2048Mi"
+          #     cpu: "1500m"
+          #   limits:
+          #     memory: "65536Mi"
+          #     cpu: "31000m"
       volumes:
+        - name: config-volume
+          configMap:
+            name: turbinia-config
+            items:
+            - key: TURBINIA_CONF
+              path: turbinia.conf
         - name: dev
           hostPath:
             path: /dev

@@ -1,0 +1,7 @@
+docker/*
+test_data/*
+.github/*
+.devcontainer/*
+docs/*
+**/*.yaml
+config/*

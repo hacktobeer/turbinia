@@ -17,8 +17,8 @@ spec:
       labels:
         app: turbinia-api-server
     spec:
-      serviceAccountName: turbinia
-      automountServiceAccountToken: false
+      #serviceAccountName: turbinia
+      #automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         seccompProfile:
@@ -26,6 +26,10 @@ spec:
         runAsUser: 999
         fsGroup: 999
         fsGroupChangePolicy: "OnRootMismatch"
+      initContainers:
+        - name: redis-probe
+          image: busybox:latest
+          command: ['sh', '-c', 'until nc -vz redis 6379; do echo "Waiting for redis..."; sleep 3; done;']
       containers:
         - name: api
           image: us-docker.pkg.dev/osdfir-registry/turbinia/release/turbinia-api-server:latest
@@ -40,33 +44,41 @@ spec:
                 fieldRef:
                   fieldPath: spec.nodeName
           volumeMounts:
+            - mountPath: /etc/turbinia
+              name: config-volume
             - mountPath: /mnt/turbiniavolume
               name: turbiniavolume
-            - mountPath: /etc/turbinia
-              name: conf
             - mountPath: /var/log
               name: logs
+            - mountPath: /var/tmp
+              name: tmp
           ports:
             - containerPort: 9200
             - containerPort: 8000
-          resources: 
-            requests:
-              memory: "4096Mi"
-              cpu: "2000m"
-            limits:
-              memory: "16384Mi"
-              cpu: "4000m"
+          # resources: 
+          #   requests:
+          #     memory: "4096Mi"
+          #     cpu: "2000m"
+          #   limits:
+          #     memory: "16384Mi"
+          #     cpu: "4000m"
           securityContext:
             readOnlyRootFilesystem: true
             runAsNonRoot: true
             allowPrivilegeEscalation: false
             runAsUser: 999
       volumes:
+        - name: config-volume
+          configMap:
+            name: turbinia-config
+            items:
+            - key: TURBINIA_CONF
+              path: turbinia.conf
         - name: turbiniavolume
           persistentVolumeClaim:
             claimName: turbiniavolume-claim
             readOnly: false
-        - name: conf
-          emptyDir: {}
         - name: logs
+          emptyDir: {}
+        - name: tmp
           emptyDir: {}

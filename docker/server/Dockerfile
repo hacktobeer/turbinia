@@ -21,7 +21,8 @@ RUN cd /tmp/ && pip3 install -r requirements.txt
 
 # unshallow and fetch all tags so our build systems pickup the correct git tag if it's a shallow clone
 RUN if $(cd /tmp/ && git rev-parse --is-shallow-repository); then cd /tmp/ && git fetch --prune --unshallow && git fetch --depth=1 origin +refs/tags/*:refs/tags/*; fi \
-    && cd /tmp/ && python3 setup.py install
+    && cd /tmp/
+#RUN python3 setup.py install
 
 RUN useradd -r -s /bin/nologin -u 999 turbinia
 
@@ -32,9 +33,12 @@ RUN mkdir /etc/turbinia && mkdir -p /mnt/turbinia/ && mkdir -p /var/lib/turbinia
     && chown -R turbinia:turbinia /etc/turbinia/ \
     && chown -R turbinia:turbinia /var/log/turbinia/
 
-COPY docker/server/start.sh /home/turbinia/start.sh
-RUN chmod +rwx /home/turbinia/start.sh
+#COPY docker/server/start.sh /home/turbinia/start.sh
+#RUN chmod +rwx /home/turbinia/start.sh
 USER turbinia
-CMD ["/home/turbinia/start.sh"]
+#CMD ["/home/turbinia/start.sh"]
+WORKDIR /tmp
+ENV PYTHONPATH .
+CMD ["sh","-c","python3 turbinia/turbiniactl.py $TURBINIA_EXTRA_ARGS server"]
 # Expose Prometheus endpoint.
 EXPOSE 9200/tcp

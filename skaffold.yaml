@@ -1,0 +1,31 @@
+apiVersion: skaffold/v4beta6
+kind: Config
+metadata:
+  name: turbinia
+build:
+  artifacts:
+    - image: us-docker.pkg.dev/osdfir-registry/turbinia/release/turbinia-api-server
+      docker:
+        dockerfile: docker/api_server/Dockerfile
+      # sync:
+      #   manual:
+      #     - src: 
+      #     - dst: 
+    - image: us-docker.pkg.dev/osdfir-registry/turbinia/release/turbinia-server
+      docker:
+        dockerfile: docker/server/Dockerfile
+    # - image: us-docker.pkg.dev/osdfir-registry/turbinia/release/turbinia-worker
+    #   docker:
+    #     dockerfile: docker/worker/Dockerfile
+manifests:
+  rawYaml:
+    - k8s/common/turbinia-volume-hostpath.yaml
+    - k8s/common/turbinia-volume-claim-hostpath.yaml
+    - k8s/celery/redis-server.yaml
+    - k8s/celery/redis-service.yaml
+    - k8s/celery/turbinia-api-server.yaml
+    - k8s/celery/turbinia-api-service.yaml
+    - k8s/common/turbinia-server-metrics-service.yaml
+    - k8s/common/turbinia-server.yaml
+    - k8s/common/turbinia-worker-metrics-service.yaml
+    - k8s/common/turbinia-worker.yaml
