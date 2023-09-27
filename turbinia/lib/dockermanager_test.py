@@ -27,7 +27,7 @@ from turbinia.lib import docker_manager
 from turbinia import TurbiniaException
 
 
-class MockImage(object):
+class MockImage:
   """Mock class for a Docker image.
 
   Attributes:
@@ -37,11 +37,11 @@ class MockImage(object):
 
   def __init__(self, id, short_id):
     """Initialization of the MockImage class."""
-    self.id = 'sha256:{0:s}'.format(id)
-    self.short_id = 'sha256:{0:s}'.format(short_id)
+    self.id = f'sha256:{id:s}'
+    self.short_id = f'sha256:{short_id:s}'
 
 
-class MockContainer(object):
+class MockContainer:
   """Mock class for a Docker container.
 
   Attributes:
@@ -66,7 +66,7 @@ class MockContainer(object):
     """Mock method of container.logs()"""
     return self.s_logs
 
-  def wait(self):
+  def wait(self, timeout):
     """Mock method of container.wait()"""
     return self.s_wait
 

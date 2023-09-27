@@ -16,12 +16,13 @@
 
 from __future__ import unicode_literals
 
-import imp
+import importlib.util
+import importlib.machinery
 import itertools
+import json
 import logging
 import os
 import sys
-
 from turbinia import TurbiniaException
 
 DATETIME_FORMAT = '%Y-%m-%dT%H:%M:%S.%fZ'
@@ -43,21 +44,34 @@ CONFIG_MSG = (
 REQUIRED_VARS = [
     # Turbinia Config
     'INSTANCE_ID',
+    'CLOUD_PROVIDER',
     'STATE_MANAGER',
     'TASK_MANAGER',
-    'LOG_FILE',
+    'LOG_DIR',
     'LOCK_FILE',
+    'TMP_RESOURCE_DIR',
+    'RESOURCE_FILE',
+    'RESOURCE_FILE_LOCK',
+    'SCALEDOWN_WORKER_FILE',
     'OUTPUT_DIR',
     'TMP_DIR',
     'SLEEP_TIME',
     'SINGLE_RUN',
     'MOUNT_DIR_PREFIX',
     'SHARED_FILESYSTEM',
-    # TODO(aarontp): Move this to the recipe config when it's available.
     'DEBUG_TASKS',
     'DEPENDENCIES',
     'DOCKER_ENABLED',
     'DISABLED_JOBS',
+    # API SERVER CONFIG
+    'API_SERVER_ADDRESS',
+    'API_SERVER_PORT',
+    'API_ALLOWED_ORIGINS',
+    'API_AUTHENTICATION_ENABLED',
+    'API_UPLOAD_CHUNK_SIZE',
+    'API_EVIDENCE_UPLOAD_DIR',
+    'API_MAX_UPLOAD_SIZE',
+    'WEBUI_PATH'
 ]
 
 # Optional config vars.  Some may be mandatory depending on the configuration
@@ -72,6 +86,7 @@ OPTIONAL_VARS = [
     'PSQ_TOPIC',
     'PUBSUB_TOPIC',
     'GCS_OUTPUT_PATH',
+    'RECIPE_FILE_DIR',
     'STACKDRIVER_LOGGING',
     'STACKDRIVER_TRACEBACK',
     # REDIS CONFIG
@@ -90,6 +105,26 @@ OPTIONAL_VARS = [
     'EMAIL_PORT',
     'EMAIL_ADDRESS',
     'EMAIL_PASSWORD',
+    # Prometheus config
+    'PROMETHEUS_ENABLED',
+    'PROMETHEUS_ADDR',
+    'PROMETHEUS_PORT',
+    # dfDewey config
+    'DFDEWEY_PG_HOST',
+    'DFDEWEY_PG_PORT',
+    'DFDEWEY_PG_DB_NAME',
+    'DFDEWEY_OS_HOST',
+    'DFDEWEY_OS_PORT',
+    'DFDEWEY_OS_URL',
+    # General config
+    'TURBINIA_COMMAND',
+    # API config
+    'OIDC_SCOPE',
+    'OIDC_KEYS',
+    'OIDC_ISSUER',
+    'OIDC_VALID_CLIENT_IDS',
+    'AUTHORIZED_EMAILS',
+    'WEBUI_CLIENT_SECRETS_FILE'
 ]
 
 # Environment variable to look for path data in
@@ -110,10 +145,7 @@ def LoadConfig(config_file=None):
   # pattern on the config class.
   # pylint: disable=global-statement
   global CONFIG
-  if CONFIG:
-    log.debug(
-        'Returning cached config from {0:s} instead of reloading config'.format(
-            CONFIG.configSource))
+  if CONFIG and not config_file:
     return CONFIG
 
   if not config_file:
@@ -133,17 +165,19 @@ def LoadConfig(config_file=None):
   if config_file is None:
     raise TurbiniaException('No config files found')
 
-  log.debug('Loading config from {0:s}'.format(config_file))
+  log.debug(f'Loading config from {config_file:s}')
   # Warn about using fallback source config, but it's currently necessary for
   # tests. See issue #446.
   if 'turbinia_config_tmpl' in config_file:
-    log.warning('Using fallback source config. {0:s}'.format(CONFIG_MSG))
+    log.warning(f'Using fallback source config. {CONFIG_MSG:s}')
   try:
-    _config = imp.load_source('config', config_file)
+    config_loader = importlib.machinery.SourceFileLoader('config', config_file)
+    config_spec = importlib.util.spec_from_loader(
+        config_loader.name, config_loader)
+    _config = importlib.util.module_from_spec(config_spec)
+    config_loader.exec_module(_config)
   except IOError as exception:
-    message = (
-        'Could not load config file {0:s}: {1!s}'.format(
-            config_file, exception))
+    message = (f'Could not load config file {config_file:s}: {exception!s}')
     log.error(message)
     raise TurbiniaException(message)
 
@@ -156,8 +190,7 @@ def LoadConfig(config_file=None):
     os.environ['GOOGLE_CLOUD_PROJECT'] = _config.TURBINIA_PROJECT
 
   CONFIG = _config
-  log.debug(
-      'Returning parsed config loaded from {0:s}'.format(CONFIG.configSource))
+  log.debug(f'Returning parsed config loaded from {CONFIG.configSource:s}')
   return _config
 
 
@@ -172,17 +205,16 @@ def ValidateAndSetConfig(_config):
     if not hasattr(_config, var):
       if var in OPTIONAL_VARS:
         log.debug(
-            'Setting non-existent but optional config variable {0:s} to '
-            'None'.format(var))
+            f'Setting non-existent but optional config variable {var:s} to None'
+        )
         empty_value = True
       else:
         raise TurbiniaException(
-            'Required config attribute {0:s}:{1:s} not in config'.format(
-                _config.configSource, var))
+            f'Required config attribute {_config.configSource:s}:{var:s} not in config'
+        )
     if var in REQUIRED_VARS and getattr(_config, var) is None:
       raise TurbiniaException(
-          'Config attribute {0:s}:{1:s} is not set'.format(
-              _config.configSource, var))
+          f'Config attribute {_config.configSource:s}:{var:s} is not set')
 
     # Set the attribute in the current module
     if empty_value:
@@ -207,8 +239,22 @@ def ParseDependencies():
       dependencies[job] = {}
       dependencies[job]['programs'] = values['programs']
       dependencies[job]['docker_image'] = values.get('docker_image')
+      dependencies[job]['timeout'] = values.get('timeout')
   except (KeyError, TypeError) as exception:
     raise TurbiniaException(
-        'An issue has occurred while parsing the '
-        'dependency config: {0!s}'.format(exception))
+        f'An issue has occurred while parsing the dependency config: {exception!s}'
+    )
   return dependencies
+
+
+def toDict():
+  """Returns a dictionary representing the current config."""
+  _config = dict()
+  config_vars = REQUIRED_VARS + OPTIONAL_VARS
+  config_dict = LoadConfig().__dict__
+
+  for attribute_key in config_dict.keys():
+    if attribute_key in config_vars:
+      _config[attribute_key] = config_dict[attribute_key]
+
+  return _config

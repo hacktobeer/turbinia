@@ -67,7 +67,7 @@ def GetDockerPath(mount_path):
           'Error parsing the Docker daemon config file due to: {0:s}. '
           'Using default Docker installation path'.format(str(exception)))
 
-  # If file not found or error occured parsing Docker config file.
+  # If file not found or error occurred parsing Docker config file.
   if docker_path is None:
     log.warning(
         'Docker daemon confile file not found. '
@@ -76,7 +76,7 @@ def GetDockerPath(mount_path):
   return docker_path
 
 
-class DockerManager(object):
+class DockerManager:
   """Class handling Docker management."""
 
   def __init__(self):
@@ -99,8 +99,12 @@ class DockerManager(object):
       docker_client = docker.from_env()
     except docker.errors.APIError as exception:
       raise TurbiniaException(
-          'An issue has occurred connecting to the Docker daemon: {0!s}'.format(
-              exception))
+          f'An issue has occurred connecting to the Docker daemon: {exception!s}'
+      )
+    except docker.errors.DockerException as exception:
+      raise TurbiniaException(
+          f'An issue has occurred connecting to the Docker daemon: {exception!s}'
+      )
     return docker_client
 
   def get_image(self, image_id):
@@ -147,7 +151,7 @@ class DockerManager(object):
         ]
     except docker.errors.APIError as exception:
       raise TurbiniaException(
-          'An error occurred retrieving the images: {0!s}'.format(exception))
+          f'An error occurred retrieving the images: {exception!s}')
     return images
 
 
@@ -170,7 +174,7 @@ class ContainerManager(DockerManager):
   def _create_mount_points(self, mount_paths, mode='rw'):
     """Creates file and device mounting arguments.
 
-    The arguments will be passed into the container with the appropiate
+    The arguments will be passed into the container with the appropriate
     mounting parameters. All device blocks will be mounted as read only,
     regardless of the specified mode.
 
@@ -193,7 +197,7 @@ class ContainerManager(DockerManager):
 
     if mode in accepted_vars:
       for mpath in mount_paths:
-        device_mpath = '{0:s}:{0:s}:{1:s}'.format(mpath, 'r')
+        device_mpath = '{0:s}:{0:s}:{1:s}'.format(str(mpath), 'r')
         if mpath not in file_paths.keys() and device_mpath not in device_paths:
           if IsBlockDevice(mpath):
             device_paths.append(device_mpath)
@@ -207,7 +211,8 @@ class ContainerManager(DockerManager):
     return device_paths, file_paths
 
   def execute_container(
-      self, cmd, shell=False, ro_paths=None, rw_paths=None, **kwargs):
+      self, cmd, shell=False, ro_paths=None, rw_paths=None, timeout_limit=3600,
+      **kwargs):
     """Executes a Docker container.
 
     A new Docker container will be created from the image id,
@@ -217,6 +222,7 @@ class ContainerManager(DockerManager):
       cmd(str|list): command to be executed.
       shell (bool): Whether the cmd is in the form of a string or a list.
       mount_paths(list): A list of paths to mount to the container.
+      timeout_limit(int): The number of seconds before killing a container.
       **kwargs: Any additional keywords to pass to the container.
 
     Returns:
@@ -234,10 +240,10 @@ class ContainerManager(DockerManager):
     # Override the entrypoint to /bin/sh
     kwargs['entrypoint'] = '/bin/sh'
     if shell:
-      cmd = '-c ' + '\"{0:s}\"'.format(cmd)
+      cmd = '-c ' + f'"{cmd:s}"'
     else:
       cmd = ' '.join(cmd)
-      cmd = '-c ' + '\"{0:s}\"'.format(cmd)
+      cmd = '-c ' + f'"{cmd:s}"'
 
     # Create the device and file mount paths
     device_paths = []
@@ -267,12 +273,11 @@ class ContainerManager(DockerManager):
         stdo = codecs.decode(stdo, 'utf-8').strip()
         log.debug(stdo)
         stdout += stdo
-      results = container.wait()
+      results = container.wait(timeout=timeout_limit)
     except docker.errors.APIError as exception:
       if container:
         container.remove(v=True)
-      message = (
-          'An error has occurred with the container: {0!s}'.format(exception))
+      message = (f'An error has occurred with the container: {exception!s}')
       log.error(message)
       raise TurbiniaException(message)
 

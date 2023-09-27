@@ -40,24 +40,24 @@ def ValidateTarFile(compressed_directory):
   """
   if not os.path.exists(compressed_directory):
     raise TurbiniaException(
-        'The File or Directory does not exist: {0:s}'.format(
-            compressed_directory))
+        f'The File or Directory does not exist: {compressed_directory:s}')
 
-  # TODO(wyassine): rewrite this check so it is not dependant
+  # TODO(wyassine): rewrite this check so it is not dependent
   # on a list of hard coded extensions and instead have a
   # check to determine whether or not it is a tar file format.
   if not (compressed_directory.endswith('.tgz') or
           compressed_directory.endswith('.tar.gz')):
     raise TurbiniaException(
         'The file is not a supported format. The list of '
-        'acceptable exensions are: .tgz or .tar.gz')
+        'acceptable extensions are: .tgz or .tar.gz')
 
 
-def CompressDirectory(uncompressed_directory):
+def CompressDirectory(uncompressed_directory, output_path=None):
   """Compress a given directory into a tar file.
 
   Args:
     uncompressed_directory(str): The path to the uncompressed directory.
+    output_path(str): The path to compress the directory into.
 
   Returns:
     str: The path to the tar file.
@@ -65,11 +65,13 @@ def CompressDirectory(uncompressed_directory):
   # Error handling check for a non-existent file or directory.
   if not os.path.exists(uncompressed_directory):
     raise TurbiniaException(
-        'The File or Directory does not exist: {0:s}'.format(
-            uncompressed_directory))
+        f'The File or Directory does not exist: {uncompressed_directory:s}')
 
   # Iterate through a given list of files and compress them.
   compressed_directory = uncompressed_directory + '.tar.gz'
+  if output_path:
+    output_file = compressed_directory.split('/')[-1]
+    compressed_directory = os.path.join(output_path, output_file)
   try:
     with tarfile.TarFile.open(compressed_directory, 'w:gz') as tar:
       tar.add(uncompressed_directory, arcname='')
@@ -78,10 +80,10 @@ def CompressDirectory(uncompressed_directory):
           'The tar file has been created and '
           'can be found at: {0:s}'.format(compressed_directory))
   except IOError as exception:
-    raise TurbiniaException('An error has occurred: {0:s}'.format(exception))
+    raise TurbiniaException(f'An error has occurred: {exception!s}')
   except tarfile.TarError as exception:
     raise TurbiniaException(
-        'An error has while compressing the directory: {0:s}'.format(exception))
+        f'An error has while compressing the directory: {exception!s}')
   return compressed_directory
 
 
@@ -112,9 +114,9 @@ def UncompressTarFile(compressed_directory, output_tmp):
         'The tar file has been uncompressed to the following directory: {0:s}'
         .format(uncompressed_directory))
   except IOError as exception:
-    raise TurbiniaException('An error has occurred: {0:s}'.format(exception))
+    raise TurbiniaException(f'An error has occurred: {exception!s}')
   except tarfile.TarError as exception:
     raise TurbiniaException(
-        'An error has occurred while uncompressing the tar '
-        'file: {0:s}'.format(exception))
+        f'An error has occurred while uncompressing the tar file: {exception!s}'
+    )
   return uncompressed_directory

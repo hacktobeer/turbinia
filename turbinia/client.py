@@ -20,214 +20,63 @@ from collections import defaultdict
 from datetime import datetime
 from datetime import timedelta
 
+import httplib2
 import json
 import logging
 from operator import itemgetter
 from operator import attrgetter
 import os
-import stat
 import time
-import subprocess
-import codecs
 
+from google import auth
 from turbinia import config
 from turbinia.config import logger
 from turbinia.config import DATETIME_FORMAT
 from turbinia import task_manager
 from turbinia import TurbiniaException
+from turbinia.lib import recipe_helpers
 from turbinia.lib import text_formatter as fmt
-from turbinia.lib import docker_manager
-from turbinia.jobs import manager as job_manager
-from turbinia.workers import Priority
-from turbinia.workers.artifact import FileArtifactExtractionTask
-from turbinia.workers.analysis.wordpress import WordpressAccessLogAnalysisTask
-from turbinia.workers.analysis.jenkins import JenkinsAnalysisTask
-from turbinia.workers.analysis.jupyter import JupyterAnalysisTask
-from turbinia.workers.finalize_request import FinalizeRequestTask
-from turbinia.workers.docker import DockerContainersEnumerationTask
-from turbinia.workers.grep import GrepTask
-from turbinia.workers.hadoop import HadoopAnalysisTask
-from turbinia.workers.hindsight import HindsightTask
-from turbinia.workers.plaso import PlasoTask
-from turbinia.workers.psort import PsortTask
-from turbinia.workers.redis import RedisAnalysisTask
-from turbinia.workers.sshd import SSHDAnalysisTask
-from turbinia.workers.strings import StringsAsciiTask
-from turbinia.workers.strings import StringsUnicodeTask
-from turbinia.workers.tomcat import TomcatAnalysisTask
-from turbinia.workers.volatility import VolatilityTask
-from turbinia.workers.worker_stat import StatTask
-from turbinia.workers.binary_extractor import BinaryExtractorTask
-from turbinia.workers.bulk_extractor import BulkExtractorTask
-from turbinia.workers.photorec import PhotorecTask
+from turbinia.message import TurbiniaRequest
+from turbinia.workers import Priority, TurbiniaTask
 
-# TODO(aarontp): Remove this map after
-# https://github.com/google/turbinia/issues/278 is fixed.
-TASK_MAP = {
-    'fileartifactextractiontask': FileArtifactExtractionTask,
-    'wordpressaccessloganalysistask': WordpressAccessLogAnalysisTask,
-    'finalizerequesttask': FinalizeRequestTask,
-    'jenkinsanalysistask': JenkinsAnalysisTask,
-    'JupyterAnalysisTask': JupyterAnalysisTask,
-    'greptask': GrepTask,
-    'hadoopanalysistask': HadoopAnalysisTask,
-    'hindsighttask': HindsightTask,
-    'plasotask': PlasoTask,
-    'psorttask': PsortTask,
-    'redisanalysistask': RedisAnalysisTask,
-    'sshdanalysistask': SSHDAnalysisTask,
-    'stringsasciitask': StringsAsciiTask,
-    'stringsunicodetask': StringsUnicodeTask,
-    'tomcatanalysistask': TomcatAnalysisTask,
-    'volatilitytask': VolatilityTask,
-    'stattask': StatTask,
-    'binaryextractor': BinaryExtractorTask,
-    'bulkextractortask': BulkExtractorTask,
-    'dockertask': DockerContainersEnumerationTask,
-    'photorectask': PhotorecTask
-}
+MAX_RETRIES = 10
+RETRY_SLEEP = 60
 
 config.LoadConfig()
-if config.TASK_MANAGER.lower() == 'psq':
-  import psq
-
-  from google.cloud import exceptions
-  from google.cloud import datastore
-  from google.cloud import pubsub
-
+if config.CLOUD_PROVIDER.lower() == 'gcp':
   from libcloudforensics.providers.gcp.internal import function as gcp_function
-elif config.TASK_MANAGER.lower() == 'celery':
+if config.TASK_MANAGER.lower() == 'celery':
   from turbinia.state_manager import RedisStateManager
 
 log = logging.getLogger('turbinia')
-logger.setup()
 
 
-def get_turbinia_client(run_local=False):
+def setup(is_client=False):
+  config.LoadConfig()
+  if is_client:
+    logger.setup(need_file_handler=False)
+  else:
+    logger.setup()
+
+
+def get_turbinia_client():
   """Return Turbinia client based on config.
 
   Returns:
     Initialized BaseTurbiniaClient or TurbiniaCeleryClient object.
   """
-  config.LoadConfig()
   # pylint: disable=no-else-return
+  setup(is_client=True)
   if config.TASK_MANAGER.lower() == 'psq':
-    return BaseTurbiniaClient(run_local=run_local)
+    return BaseTurbiniaClient()
   elif config.TASK_MANAGER.lower() == 'celery':
-    return TurbiniaCeleryClient(run_local=run_local)
+    return TurbiniaCeleryClient()
   else:
-    msg = 'Task Manager type "{0:s}" not implemented'.format(
-        config.TASK_MANAGER)
+    msg = f'Task Manager type "{config.TASK_MANAGER:s}" not implemented'
     raise TurbiniaException(msg)
 
 
-def check_docker_dependencies(dependencies):
-  """Checks docker dependencies.
-
-  Args:
-    dependencies(dict): dictionary of dependencies to check for.
-
-  Raises:
-    TurbiniaException: If dependency is not met.
-  """
-  #TODO(wyassine): may run into issues down the line when a docker image
-  # does not have bash or which installed. (no linux fs layer).
-  log.info('Performing docker dependency check.')
-  job_names = list(job_manager.JobsManager.GetJobNames())
-  images = docker_manager.DockerManager().list_images(return_filter='short_id')
-
-  # Iterate through list of jobs
-  for job, values in dependencies.items():
-    if job not in job_names:
-      log.warning(
-          'The job {0:s} was not found or has been disabled. Skipping '
-          'dependency check...'.format(job))
-      continue
-    docker_image = values.get('docker_image')
-    # short id only pulls the first 10 characters of image id.
-    if docker_image and len(docker_image) > 10:
-      docker_image = docker_image[0:10]
-
-    if docker_image in images:
-      for program in values['programs']:
-        cmd = 'type {0:s}'.format(program)
-        stdout, stderr, ret = docker_manager.ContainerManager(
-            values['docker_image']).execute_container(cmd, shell=True)
-        if ret != 0:
-          raise TurbiniaException(
-              'Job dependency {0:s} not found for job {1:s}. Please install '
-              'the dependency for the container or disable the job.'.format(
-                  program, job))
-      job_manager.JobsManager.RegisterDockerImage(job, values['docker_image'])
-    elif docker_image:
-      raise TurbiniaException(
-          'Docker image {0:s} was not found for the job {1:s}. Please '
-          'update the config with the correct image id'.format(
-              values['docker_image'], job))
-
-
-def check_system_dependencies(dependencies):
-  """Checks system dependencies.
-
-  Args:
-    dependencies(dict): dictionary of dependencies to check for.
-
-  Raises:
-    TurbiniaException: If dependency is not met.
-  """
-  log.info('Performing system dependency check.')
-  job_names = list(job_manager.JobsManager.GetJobNames())
-
-  # Iterate through list of jobs
-  for job, values in dependencies.items():
-    if job not in job_names:
-      log.warning(
-          'The job {0:s} was not found or has been disabled. Skipping '
-          'dependency check...'.format(job))
-      continue
-    elif not values.get('docker_image'):
-      for program in values['programs']:
-        cmd = 'type {0:s}'.format(program)
-        proc = subprocess.Popen(cmd, shell=True)
-        proc.communicate()
-        ret = proc.returncode
-        if ret != 0:
-          raise TurbiniaException(
-              'Job dependency {0:s} not found in $PATH for the job {1:s}. '
-              'Please install the dependency or disable the job.'.format(
-                  program, job))
-
-
-def check_directory(directory):
-  """Checks directory to make sure it exists and is writable.
-
-  Args:
-    directory (string): Path to directory
-
-  Raises:
-    TurbiniaException: When directory cannot be created or used.
-  """
-  if os.path.exists(directory) and not os.path.isdir(directory):
-    raise TurbiniaException(
-        'File {0:s} exists, but is not a directory'.format(directory))
-
-  if not os.path.exists(directory):
-    try:
-      os.makedirs(directory)
-    except OSError:
-      raise TurbiniaException(
-          'Can not create Directory {0:s}'.format(directory))
-
-  if not os.access(directory, os.W_OK):
-    try:
-      mode = os.stat(directory)[0]
-      os.chmod(directory, mode | stat.S_IWUSR)
-    except OSError:
-      raise TurbiniaException(
-          'Can not add write permissions to {0:s}'.format(directory))
-
-
-class TurbiniaStats(object):
+class TurbiniaStats:
   """Statistics for Turbinia task execution.
 
   Attributes:
@@ -299,38 +148,122 @@ class TurbiniaStats(object):
         self.description, self.count, self.min, self.mean, self.max)
 
 
-class BaseTurbiniaClient(object):
+class BaseTurbiniaClient:
   """Client class for Turbinia.
 
   Attributes:
     task_manager (TaskManager): Turbinia task manager
   """
 
-  def __init__(self, run_local=False):
+  def __init__(self):
     config.LoadConfig()
-    if run_local:
-      self.task_manager = None
-    else:
-      self.task_manager = task_manager.get_task_manager()
-      self.task_manager.setup(server=False)
+    self.task_manager = task_manager.get_task_manager()
+    self.task_manager.setup(server=False)
 
-  def create_task(self, task_name):
-    """Creates a Turbinia Task by name.
+  def _create_default_recipe(self):
+    """Creates a default Turbinia recipe."""
+    default_recipe = recipe_helpers.DEFAULT_RECIPE
+    return default_recipe
+
+  def create_recipe(
+      self, debug_tasks=False, filter_patterns=None, group_id='',
+      jobs_allowlist=None, jobs_denylist=None, recipe_name=None, sketch_id=None,
+      skip_recipe_validation=False, yara_rules=None, group_name=None,
+      reason=None, all_args=None):
+    """Creates a Turbinia recipe.
+
+    If no recipe_name is specified, this  method returns a default recipe.
+    If a recipe_name is specified then this method will build the recipe
+    dictionary by reading the  contents of a recipe file. The path to
+    the recipe file is inferred from the recipe_name and the RECIPE_FILE_DIR
+    configuration parameter.
 
     Args:
-      task_name(string): Name of the Task we are going to run.
+      debug_tasks (bool): flag to turn debug output on for supported tasks.
+      filter_patterns (list): a list of filter pattern strings.
+      group_id (str): a group identifier.
+      jobs_allowlist (list): a list of jobs allowed for execution.
+      jobs_denylist (list): a list of jobs that will not be executed.
+      recipe_name (str): Turbinia recipe name (e.g. triage-linux).
+      sketch_id (str): a Timesketch sketch identifier.
+      skip_recipe_validation (bool): flag indicates if the recipe will be
+          validated.
+      yara_rules (str): a string containing yara rules.
+      group_name (str): Name for grouping evidence.
+      reason (str): Reason or justification for Turbinia requests.
+      all_args (str): a string of commandline arguments provided to run client.
 
     Returns:
-      TurbiniaTask: An instantiated Task object.
-
-    Raises:
-      TurbiniaException: When no Task object matching task_name is found.
+      dict: a Turbinia recipe dictionary.
     """
-    task_obj = TASK_MAP.get(task_name.lower())
-    log.debug('Looking up Task {0:s} by name'.format(task_name))
-    if not task_obj:
-      raise TurbiniaException('No Task named {0:s} found'.format(task_name))
-    return task_obj()
+    recipe = None
+    if jobs_allowlist and jobs_denylist:
+      raise TurbiniaException(
+          'jobs_allowlist and jobs_denylist are mutually exclusive.')
+
+    if not recipe_name:
+      # if no recipe_name is given, create a default recipe.
+      recipe = self._create_default_recipe()
+      if filter_patterns:
+        recipe['globals']['filter_patterns'] = filter_patterns
+      if jobs_denylist:
+        recipe['globals']['jobs_denylist'] = jobs_denylist
+      if jobs_allowlist:
+        recipe['globals']['jobs_allowlist'] = jobs_allowlist
+    else:
+      # Load custom recipe from given path or name.
+      if (jobs_denylist or jobs_allowlist or filter_patterns):
+        msg = (
+            'Specifying a recipe name is incompatible with defining '
+            'jobs allow/deny lists, or a patterns file separately.')
+        raise TurbiniaException(msg)
+
+      if os.path.exists(recipe_name):
+        recipe_path = recipe_name
+      else:
+        recipe_path = recipe_helpers.get_recipe_path_from_name(recipe_name)
+
+      if not os.path.exists(recipe_path):
+        msg = f'Could not find recipe file at {recipe_path:s}'
+        log.error(msg)
+        raise TurbiniaException(msg)
+
+      recipe = recipe_helpers.load_recipe_from_file(
+          recipe_path, skip_recipe_validation)
+      if not recipe:
+        msg = f'Could not load recipe from file at {recipe_path:s}.'
+        raise TurbiniaException(msg)
+
+    # Set any additional recipe parameters, if specified.
+    if sketch_id:
+      recipe['globals']['sketch_id'] = sketch_id
+    if debug_tasks:
+      recipe['globals']['debug_tasks'] = debug_tasks
+    if group_id:
+      recipe['globals']['group_id'] = group_id
+    if group_name:
+      recipe['globals']['group_name'] = group_name
+    if reason:
+      recipe['globals']['reason'] = reason
+    if all_args:
+      recipe['globals']['all_args'] = all_args
+    if yara_rules:
+      recipe['globals']['yara_rules'] = yara_rules
+
+    return recipe
+
+  def create_request(
+      self, request_id=None, group_id=None, requester=None, recipe=None,
+      context=None, evidence_=None, group_name=None, reason=None,
+      all_args=None):
+    """Wrapper method to create a Turbinia request."""
+    default_recipe = self.create_recipe()
+    request = TurbiniaRequest(
+        request_id=request_id, group_id=group_id, requester=requester,
+        recipe=recipe if recipe else default_recipe, context=context,
+        evidence=evidence_, group_name=group_name, reason=reason,
+        all_args=all_args)
+    return request
 
   def list_jobs(self):
     """List the available jobs."""
@@ -338,7 +271,7 @@ class BaseTurbiniaClient(object):
     # the task manager from the client.
     log.info('Available Jobs:')
     for job in self.task_manager.jobs:
-      log.info('\t{0:s}'.format(job.NAME))
+      log.info(f'\t{job.NAME:s}')
 
   def wait_for_request(
       self, instance, project, region, request_id=None, user=None,
@@ -370,10 +303,26 @@ class BaseTurbiniaClient(object):
       if completed_tasks and len(completed_tasks) == len(task_results):
         break
 
-      completed_names = [t.get('name') for t in completed_tasks]
-      completed_names = ', '.join(sorted(completed_names))
-      uncompleted_names = [t.get('name') for t in uncompleted_tasks]
-      uncompleted_names = ', '.join(sorted(uncompleted_names))
+      tasks = {}
+      completed_names = ''
+      completed_names_list = []
+      for task in completed_tasks:
+        task_name = task.get('name')
+        tasks[task_name] = tasks.get(task_name, 0) + 1
+      for task, count in sorted(tasks.items()):
+        completed_names_list.append(f'{task:s}:{count:d}')
+      completed_names = ', '.join(completed_names_list)
+
+      tasks = {}
+      uncompleted_names = ''
+      uncompleted_names_list = []
+      for task in uncompleted_tasks:
+        task_name = task.get('name')
+        tasks[task_name] = tasks.get(task_name, 0) + 1
+      for task, count in sorted(tasks.items()):
+        uncompleted_names_list.append(f'{task:s}:{count:d}')
+      uncompleted_names = ', '.join(uncompleted_names_list)
+
       total_count = len(completed_tasks) + len(uncompleted_tasks)
       msg = (
           'Tasks completed ({0:d}/{1:d}): [{2:s}], waiting for [{3:s}].'.format(
@@ -389,11 +338,11 @@ class BaseTurbiniaClient(object):
       last_uncompleted_count = len(uncompleted_tasks)
       time.sleep(poll_interval)
 
-    log.info('All {0:d} Tasks completed'.format(len(task_results)))
+    log.info(f'All {len(task_results):d} Tasks completed')
 
   def get_task_data(
       self, instance, project, region, days=0, task_id=None, request_id=None,
-      user=None, function_name='gettasks'):
+      group_id=None, user=None, function_name='gettasks', output_json=False):
     """Gets task data from Google Cloud Functions.
 
     Args:
@@ -403,12 +352,14 @@ class BaseTurbiniaClient(object):
       region (string): The name of the region to execute in.
       days (int): The number of days we want history for.
       task_id (string): The Id of the task.
+      group_id (string): The group Id of the requests.
       request_id (string): The Id of the request we want tasks for.
       user (string): The user of the request we want tasks for.
-      function_name (string): The GCF function we want to call
+      function_name (string): The GCF function we want to call.
+      output_json (bool): Whether to return JSON output.
 
     Returns:
-      List of Task dict objects.
+      (List|JSON string) of Task dict objects
     """
     cloud_function = gcp_function.GoogleCloudFunction(project)
     func_args = {'instance': instance, 'kind': 'TurbiniaTask'}
@@ -421,32 +372,82 @@ class BaseTurbiniaClient(object):
       func_args.update({'start_time': start_string})
     elif task_id:
       func_args.update({'task_id': task_id})
+    elif group_id:
+      func_args.update({'group_id': group_id})
     elif request_id:
       func_args.update({'request_id': request_id})
 
     if user:
       func_args.update({'user': user})
 
-    response = cloud_function.ExecuteFunction(function_name, region, func_args)
-    if 'result' not in response:
+    response = {}
+    retry_count = 0
+    credential_error_count = 0
+    while not response and retry_count < MAX_RETRIES:
+      try:
+        response = cloud_function.ExecuteFunction(
+            function_name, region, func_args)
+      except auth.exceptions.RefreshError as exception:
+        if credential_error_count == 0:
+          log.info(
+              'GCP Credentials need to be refreshed by running gcloud auth '
+              'application-default login, please refresh in another terminal '
+              'and run turbiniactl -w status -r {0!s} and this process will '
+              'resume. Error: {1!s}'.format(request_id, exception))
+        else:
+          log.debug(
+              'GCP Credentials need to be refreshed by running gcloud auth '
+              'application-default login, please refresh in another terminal '
+              'and run turbiniactl -w status -r {0!s} and this process will '
+              'resume. Attempt {1:d}. Error: '
+              '{2!s}'.format(request_id, credential_error_count + 1, exception))
+        # Note, we are intentionally not incrementing the retry_count here because
+        # we will retry indefinitely while we wait for the user to reauth.
+        credential_error_count += 1
+      except httplib2.ServerNotFoundError as exception:
+        log.info(
+            'Error connecting to server, will retry [{0:d} of {1:d} retries]: '
+            '{2!s}'.format(retry_count, MAX_RETRIES, exception))
+        retry_count += 1
+
+      if not response:
+        retry_count += 1
+        time.sleep(RETRY_SLEEP)
+      elif response.get('error', {}).get('code') == 503:
+        log.warning(
+            'Retriable error response from cloud functions: [{0!s}]'.format(
+                response.get('error')))
+        retry_count += 1
+        response = {}
+        time.sleep(RETRY_SLEEP)
+
+    if not response or 'result' not in response:
       log.error('No results found')
-      if response.get('error', '{}') != '{}':
-        msg = 'Error executing Cloud Function: [{0!s}].'.format(
-            response.get('error'))
+      if response.get('error'):
+        msg = f"Error executing Cloud Function: [{response.get('error')!s}]."
         log.error(msg)
-      log.debug('GCF response: {0!s}'.format(response))
+      log.debug(f'Invalid or empty GCF response: {response!s}')
       raise TurbiniaException(
-          'Cloud Function {0:s} returned no results.'.format(function_name))
+          f'Cloud Function {function_name:s} returned no results.')
 
     try:
-      results = json.loads(response['result'])
-    except (TypeError, ValueError) as e:
+      results = json.loads(response.get('result'))
+    except (TypeError, ValueError) as exception:
       raise TurbiniaException(
           'Could not deserialize result [{0!s}] from GCF: [{1!s}]'.format(
-              response.get('result'), e))
+              response.get('result'), exception))
+
+    task_data = results[0]
+    if output_json:
+      try:
+        json_data = json.dumps(task_data)
+      except (TypeError, ValueError) as exception:
+        raise TurbiniaException(
+            'Could not re-serialize result [{0!s}] from GCF: [{1!s}]'.format(
+                str(task_data), exception))
+      return json_data
 
     # Convert run_time/last_update back into datetime objects
-    task_data = results[0]
     for task in task_data:
       if task.get('run_time'):
         task['run_time'] = timedelta(seconds=task['run_time'])
@@ -471,11 +472,12 @@ class BaseTurbiniaClient(object):
     status = task.get('status') or 'No task status'
 
     report.append(fmt.heading2(task.get('name')))
-    line = '{0:s} {1:s}'.format(fmt.bold('Status:'), status)
+    line = f"{fmt.bold('Evidence:'):s} {task.get('evidence_name')!s}"
     report.append(fmt.bullet(line))
-    report.append(fmt.bullet('Task Id: {0:s}'.format(task.get('id'))))
-    report.append(
-        fmt.bullet('Executed on worker {0:s}'.format(task.get('worker_name'))))
+    line = f"{fmt.bold('Status:'):s} {status:s}"
+    report.append(fmt.bullet(line))
+    report.append(fmt.bullet(f"Task Id: {task.get('id')!s}"))
+    report.append(fmt.bullet(f"Executed on worker {task.get('worker_name')!s}"))
     if task.get('report_data'):
       report.append('')
       report.append(fmt.heading3('Task Reported Data'))
@@ -486,6 +488,25 @@ class BaseTurbiniaClient(object):
       for path in saved_paths:
         report.append(fmt.bullet(fmt.code(path)))
       report.append('')
+    return report
+
+  def format_worker_task(self, task):
+    """Formats a single task for Worker view.
+
+    Args:
+      task (dict): The task to format data for
+    Returns:
+      list: Formatted task data
+    """
+    report = []
+    report.append(fmt.bullet(f"{task['task_id']:s} - {task['task_name']:s}"))
+    report.append(
+        fmt.bullet(
+            f"Last Update: {task['last_update'].strftime(DATETIME_FORMAT):s}",
+            level=2))
+    report.append(fmt.bullet(f"Status: {task['status']:s}", level=2))
+    report.append(fmt.bullet(f"Run Time: {str(task['run_time']):s}", level=2))
+    report.append('')
     return report
 
   def format_task(self, task, show_files=False):
@@ -501,7 +522,10 @@ class BaseTurbiniaClient(object):
     report = []
     saved_paths = task.get('saved_paths') or []
     status = task.get('status') or 'No task status'
-    report.append(fmt.bullet('{0:s}: {1:s}'.format(task.get('name'), status)))
+    report.append(
+        fmt.bullet(
+            f"{task.get('name'):s} ({task.get('evidence_name')!s}): {status:s}")
+    )
     if show_files:
       for path in saved_paths:
         report.append(fmt.bullet(fmt.code(path), level=2))
@@ -572,7 +596,7 @@ class BaseTurbiniaClient(object):
       if task_type in task_stats['tasks_per_type']:
         task_type_stats = task_stats['tasks_per_type'].get(task_type)
       else:
-        task_type_stats = TurbiniaStats('Task type {0:s}'.format(task_type))
+        task_type_stats = TurbiniaStats(f'Task type {task_type:s}')
         task_stats['tasks_per_type'][task_type] = task_type_stats
       task_type_stats.add_task(task)
 
@@ -580,7 +604,7 @@ class BaseTurbiniaClient(object):
       if worker in task_stats['tasks_per_worker']:
         worker_stats = task_stats['tasks_per_worker'].get(worker)
       else:
-        worker_stats = TurbiniaStats('Worker {0:s}'.format(worker))
+        worker_stats = TurbiniaStats(f'Worker {worker:s}')
         task_stats['tasks_per_worker'][worker] = worker_stats
       worker_stats.add_task(task)
 
@@ -588,7 +612,7 @@ class BaseTurbiniaClient(object):
       if user in task_stats['tasks_per_user']:
         user_stats = task_stats['tasks_per_user'].get(user)
       else:
-        user_stats = TurbiniaStats('User {0:s}'.format(user))
+        user_stats = TurbiniaStats(f'User {user:s}')
         task_stats['tasks_per_user'][user] = user_stats
       user_stats.add_task(task)
 
@@ -676,10 +700,194 @@ class BaseTurbiniaClient(object):
     report.append('')
     return '\n'.join(report)
 
+  def format_worker_status(
+      self, instance, project, region, days=0, all_fields=False):
+    """Formats the recent history for Turbinia Workers.
+
+    Args:
+      instance (string): The Turbinia instance name (by default the same as the
+          INSTANCE_ID in the config).
+      project (string): The name of the project.
+      region (string): The name of the zone to execute in.
+      days (int): The number of days we want history for.
+      all_fields (bool): Include historical Task information for the worker.
+    Returns:
+      String of Request status
+    """
+    # Set number of days to retrieve data
+    num_days = 7
+    if days != 0:
+      num_days = days
+    task_results = self.get_task_data(instance, project, region, days=num_days)
+    if not task_results:
+      return ''
+
+    # Sort task_results by last updated timestamp.
+    task_results = sorted(
+        task_results, key=itemgetter('last_update'), reverse=True)
+
+    # Create dictionary of worker_node: {{task_id, task_update,
+    # task_name, task_status}}
+    workers_dict = {}
+    unassigned_dict = {}
+    scheduled_counter = 0
+    for result in task_results:
+      worker_node = result.get('worker_name')
+      status = result.get('status')
+      status = status if status else 'No task status'
+      if worker_node and worker_node not in workers_dict:
+        workers_dict[worker_node] = []
+      elif not worker_node:
+        # Track scheduled/unassigned Tasks for reporting.
+        scheduled_counter += 1
+        worker_node = 'Unassigned'
+        if worker_node not in unassigned_dict:
+          unassigned_dict[worker_node] = []
+      if worker_node:
+        task_dict = {}
+        task_dict['task_id'] = result.get('id')
+        task_dict['last_update'] = result.get('last_update')
+        task_dict['task_name'] = result.get('name')
+        task_dict['status'] = status
+        # Check status for anything that is running.
+        if 'running' in status:
+          run_time = (datetime.utcnow() -
+                      result.get('last_update')).total_seconds()
+          run_time = timedelta(seconds=run_time)
+          task_dict['run_time'] = run_time
+        else:
+          run_time = result.get('run_time')
+          task_dict['run_time'] = run_time if run_time else 'No run time.'
+        # Update to correct dictionary
+        if worker_node == 'Unassigned':
+          unassigned_dict[worker_node].append(task_dict)
+        else:
+          workers_dict[worker_node].append(task_dict)
+
+    # Generate report header
+    report = []
+    report.append(
+        fmt.heading1(
+            f'Turbinia report for Worker activity within {num_days:d} days'))
+    report.append(fmt.bullet(f'{len(workers_dict.keys()):d} Worker(s) found.'))
+    report.append(
+        fmt.bullet(
+            '{0:d} Task(s) unassigned or scheduled and pending Worker assignment.'
+            .format(scheduled_counter)))
+    for worker_node, tasks in workers_dict.items():
+      report.append('')
+      report.append(fmt.heading2(f'Worker Node: {worker_node:s}'))
+      # Append the statuses chronologically
+      run_status, queued_status, other_status = [], [], []
+      for task in tasks:
+        if 'running' in task['status']:
+          run_status.extend(self.format_worker_task(task))
+        elif 'queued' in task['status']:
+          queued_status.extend(self.format_worker_task(task))
+        else:
+          other_status.extend(self.format_worker_task(task))
+      # Add each of the status lists back to report list
+      not_found = [fmt.bullet('No Tasks found.')]
+      report.append(fmt.heading3('Running Tasks'))
+      report.extend(run_status if run_status else not_found)
+      report.append('')
+      report.append(fmt.heading3('Queued Tasks'))
+      report.extend(queued_status if queued_status else not_found)
+      # Add Finished Tasks
+      if all_fields:
+        report.append('')
+        report.append(fmt.heading3('Finished Tasks'))
+        report.extend(other_status if other_status else not_found)
+
+    # Add unassigned worker tasks
+    unassigned_status = []
+    for tasks in unassigned_dict.values():
+      for task in tasks:
+        unassigned_status.extend(self.format_worker_task(task))
+    # Now add to main report
+    if all_fields:
+      report.append('')
+      report.append(fmt.heading2('Unassigned Worker Tasks'))
+      report.extend(unassigned_status if unassigned_status else not_found)
+
+    return '\n'.join(report)
+
+  def format_request_status(
+      self, instance, project, region, days=0, all_fields=False):
+    """Formats the recent history for Turbinia Requests.
+
+    Args:
+      instance (string): The Turbinia instance name (by default the same as the
+          INSTANCE_ID in the config).
+      project (string): The name of the project.
+      region (string): The name of the zone to execute in.
+      days (int): The number of days we want history for.
+      all_fields (bool): Include all fields for the Request, which includes,
+          saved file paths.
+    Returns:
+      String of Request status
+    """
+    # Set number of days to retrieve data
+    num_days = 7
+    if days != 0:
+      num_days = days
+    task_results = self.get_task_data(instance, project, region, days=num_days)
+    if not task_results:
+      return ''
+
+    # Sort task_results by last updated timestamp.
+    task_results = sorted(
+        task_results, key=itemgetter('last_update'), reverse=True)
+
+    # Create dictionary of request_id: {saved_paths, last_update, requester,
+    # task_id}
+    request_dict = {}
+    for result in task_results:
+      request_id = result.get('request_id')
+      saved_paths = result.get('saved_paths')
+      if request_id not in request_dict:
+        saved_paths = set(saved_paths) if saved_paths else set()
+        request_dict[request_id] = {}
+        request_dict[request_id]['saved_paths'] = saved_paths
+        request_dict[request_id]['last_update'] = result.get('last_update')
+        request_dict[request_id]['requester'] = result.get('requester')
+        request_dict[request_id]['task_id'] = set([result.get('id')])
+      else:
+        if saved_paths:
+          request_dict[request_id]['saved_paths'].update(saved_paths)
+        request_dict[request_id]['task_id'].update([result.get('id')])
+
+    # Generate report header
+    report = []
+    report.append(
+        fmt.heading1(
+            f'Turbinia report for Requests made within {num_days:d} days'))
+    report.append(
+        fmt.bullet(
+            f'{len(request_dict.keys()):d} requests were made within this timeframe.'
+        ))
+    # Print report data for Requests
+    for request_id, values in request_dict.items():
+      report.append('')
+      report.append(fmt.heading2(f'Request ID: {request_id:s}'))
+      report.append(
+          fmt.bullet(
+              f"Last Update: {values['last_update'].strftime(DATETIME_FORMAT):s}"
+          ))
+      report.append(fmt.bullet(f"Requester: {values['requester']:s}"))
+      report.append(fmt.bullet(f"Task Count: {len(values['task_id']):d}"))
+      if all_fields:
+        report.append(fmt.bullet('Associated Evidence:'))
+        # Append all saved paths in request
+        for path in sorted(values['saved_paths']):
+          report.append(fmt.bullet(fmt.code(path), level=2))
+        report.append('')
+    return '\n'.join(report)
+
   def format_task_status(
       self, instance, project, region, days=0, task_id=None, request_id=None,
-      user=None, all_fields=False, full_report=False,
-      priority_filter=Priority.HIGH):
+      group_id=None, user=None, all_fields=False, full_report=False,
+      priority_filter=Priority.HIGH, output_json=False, report=None):
     """Formats the recent history for Turbinia Tasks.
 
     Args:
@@ -690,6 +898,7 @@ class BaseTurbiniaClient(object):
       days (int): The number of days we want history for.
       task_id (string): The Id of the task.
       request_id (string): The Id of the request we want tasks for.
+      group_id (string): Group Id of the requests.
       user (string): The user of the request we want tasks for.
       all_fields (bool): Include all fields for the task, including task,
           request ids and saved file paths.
@@ -697,16 +906,23 @@ class BaseTurbiniaClient(object):
           summary.
       priority_filter (int): Output only a summary for Tasks with a value
           greater than the priority_filter.
+      output_json (bool): Whether to return JSON output.
+      report (string): Status report that will be returned.
 
     Returns:
-      String of task status
+      String of task status in JSON or human readable format.
     """
     if user and days == 0:
       days = 1000
     task_results = self.get_task_data(
-        instance, project, region, days, task_id, request_id, user)
+        instance, project, region, days, task_id, request_id, group_id, user,
+        output_json=output_json)
     if not task_results:
       return ''
+
+    if output_json:
+      return task_results
+
     # Sort all tasks by the report_priority so that tasks with a higher
     # priority are listed first in the report.
     for result in task_results:
@@ -718,65 +934,84 @@ class BaseTurbiniaClient(object):
     if not num_results:
       msg = 'No Turbinia Tasks found.'
       log.info(msg)
-      return '\n{0:s}'.format(msg)
+      return f'\n{msg:s}'
 
     # Build up data
-    report = []
-    requester = task_results[0].get('requester')
-    request_id = task_results[0].get('request_id')
+    if report is None:
+      report = []
     success_types = ['Successful', 'Failed', 'Scheduled or Running']
     success_values = [True, False, None]
     # Reverse mapping values to types
     success_map = dict(zip(success_values, success_types))
+    # This is used for group ID status
+    requests = defaultdict(dict)
+    requester = task_results[0].get('requester')
+    request_id = task_results[0].get('request_id')
     task_map = defaultdict(list)
     success_types.insert(0, 'High Priority')
     for task in task_results:
+      if task.get('request_id') not in requests:
+        requests[task.get('request_id')] = {
+            'Successful': 0,
+            'Failed': 0,
+            'Scheduled or Running': 0
+        }
+      requests[task.get('request_id')][success_map[task.get('successful')]] += 1
       if task.get('report_priority') <= priority_filter:
         task_map['High Priority'].append(task)
       else:
         task_map[success_map[task.get('successful')]].append(task)
 
+    if group_id:
+      report.append('\n')
+      report.append(fmt.heading1(f'Turbinia report for group ID {group_id:s}'))
+      for request_id, success_counts in requests.items():
+        report.append(
+            fmt.bullet(
+                'Request Id {0:s} with {1:d} successful, {2:d} failed, and {3:d} running tasks.'
+                .format(
+                    request_id, success_counts['Successful'],
+                    success_counts['Failed'],
+                    success_counts['Scheduled or Running'])))
+        if full_report:
+          self.format_task_status(
+              instance, project, region, days=0, task_id=None,
+              request_id=request_id, user=user, all_fields=all_fields,
+              full_report=full_report, priority_filter=priority_filter,
+              output_json=output_json, report=report)
+
+      return '\n'.join(report)
+
     # Generate report header
     report.append('\n')
-    report.append(fmt.heading1('Turbinia report {0:s}'.format(request_id)))
+    report.append(fmt.heading1(f'Turbinia report {request_id:s}'))
     report.append(
-        fmt.bullet(
-            'Processed {0:d} Tasks for user {1:s}'.format(
-                num_results, requester)))
+        fmt.bullet(f'Processed {num_results:d} Tasks for user {requester:s}'))
 
     # Print report data for tasks
     for success_type in success_types:
       report.append('')
-      report.append(fmt.heading1('{0:s} Tasks'.format(success_type)))
+      report.append(fmt.heading1(f'{success_type:s} Tasks'))
       if not task_map[success_type]:
         report.append(fmt.bullet('None'))
+      task_counter = defaultdict(int)
       for task in task_map[success_type]:
         if full_report and success_type == success_types[0]:
           report.extend(self.format_task_detail(task, show_files=all_fields))
-        else:
+        elif success_type == success_types[2]:
           report.extend(self.format_task(task, show_files=all_fields))
+        else:
+          task_counter['\n'.join(self.format_task(task,
+                                                  show_files=all_fields))] += 1
+
+      if len(task_counter):
+        for k, v in task_counter.items():
+          if v == 1:
+            report.append(k)
+          else:
+            report.append(f'{k:s} x {v:d}')
 
     return '\n'.join(report)
-
-  def run_local_task(self, task_name, request):
-    """Runs a Turbinia Task locally.
-
-    Args:
-      task_name(string): Name of the Task we are going to run.
-      request (TurbiniaRequest): Object containing request and evidence info.
-
-    Returns:
-      TurbiniaTaskResult: The result returned by the Task Execution.
-    """
-    task = self.create_task(task_name)
-    task.request_id = request.request_id
-    task.base_output_dir = config.OUTPUT_DIR
-    task.run_local = True
-    if not request.evidence:
-      raise TurbiniaException('TurbiniaRequest does not contain evidence.')
-    log.info('Running Task {0:s} locally'.format(task_name))
-    result = task.run_wrapper(request.evidence[0])
-    return result
 
   def send_request(self, request):
     """Sends a TurbiniaRequest message.
@@ -813,7 +1048,7 @@ class BaseTurbiniaClient(object):
         'requester': requester
     }
     response = cloud_function.ExecuteFunction('closetasks', region, func_args)
-    return 'Closed Task IDs: %s' % response.get('result')
+    return f"Closed Task IDs: {response.get('result')}"
 
 
 class TurbiniaCeleryClient(BaseTurbiniaClient):
@@ -829,6 +1064,48 @@ class TurbiniaCeleryClient(BaseTurbiniaClient):
     super(TurbiniaCeleryClient, self).__init__(*args, **kwargs)
     self.redis = RedisStateManager()
 
+  # pylint: disable=arguments-differ
+  def close_tasks(
+      self, instance, request_id=None, group_id=None, task_id=None,
+      user=None) -> bool:
+    """Close Turbinia Tasks based on Request ID.
+
+    This method uses Celery app.control.terminate to terminate and revoke a
+    task_id or a list of task_ids. If a task is revoked, the workers will
+    ignore the task and not execute it after all.
+
+    Args:
+      instance (string): The Turbinia instance name (by default the same as the
+          INSTANCE_ID in the config).
+      request_id (string): The request identifier we want tasks for.
+      task_id (string): The task identifier we want.
+      group_id (str): A group identifier we want tasks for.
+      user (string): The user of the request we want tasks for.
+
+    Returns: True if a terminate command was successfully broadcast to the
+        Celery workers.
+    """
+    tasks = self.redis.get_task_data(
+        instance, task_id=task_id, request_id=request_id, group_id=group_id,
+        user=user)
+    task_ids = [task.get('id') for task in tasks if task.get('id')]
+    result = False
+
+    if task_ids:
+      for _task_id in task_ids:
+        self.task_manager.celery.app.control.terminate(_task_id)
+        log.info(f'Closed task {_task_id}.')
+        task_dict = self.redis.get_task_data(
+            instance=config.INSTANCE_ID, task_id=_task_id)[0]
+        task = TurbiniaTask().deserialize(task_dict)
+        task['success'] = False
+        task['status'] = 'Task forcefully closed.'
+        self.redis.update_task(task)
+      result = True
+    else:
+      log.info('No tasks found with the given filter(s). Not closing any tasks')
+    return bool(result)
+
   def send_request(self, request):
     """Sends a TurbiniaRequest message.
 
@@ -840,7 +1117,7 @@ class TurbiniaCeleryClient(BaseTurbiniaClient):
   # pylint: disable=arguments-differ
   def get_task_data(
       self, instance, _, __, days=0, task_id=None, request_id=None,
-      function_name=None):
+      group_id=None, user=None, function_name=None, output_json=False):
     """Gets task data from Redis.
 
     We keep the same function signature, but ignore arguments passed for GCP.
@@ -851,153 +1128,13 @@ class TurbiniaCeleryClient(BaseTurbiniaClient):
       days (int): The number of days we want history for.
       task_id (string): The Id of the task.
       request_id (string): The Id of the request we want tasks for.
+      group_id (string): Group Id of the requests.
+      user (string): The user of the request we want tasks for.
+      function_name (string): unused.
+      output_json (bool): unused.
 
     Returns:
       List of Task dict objects.
     """
-    return self.redis.get_task_data(instance, days, task_id, request_id)
-
-
-class TurbiniaServer(object):
-  """Turbinia Server class.
-
-  Attributes:
-    task_manager (TaskManager): An object to manage turbinia tasks.
-  """
-
-  def __init__(self, jobs_blacklist=None, jobs_whitelist=None):
-    """Initializes Turbinia Server.
-
-    Args:
-      jobs_blacklist (Optional[list[str]]): Jobs we will exclude from running
-      jobs_whitelist (Optional[list[str]]): The only Jobs we will include to run
-    """
-    config.LoadConfig()
-    self.task_manager = task_manager.get_task_manager()
-    self.task_manager.setup(jobs_blacklist, jobs_whitelist)
-
-  def start(self):
-    """Start Turbinia Server."""
-    log.info('Running Turbinia Server.')
-    self.task_manager.run()
-
-  def add_evidence(self, evidence_):
-    """Add evidence to be processed."""
-    self.task_manager.add_evidence(evidence_)
-
-
-class TurbiniaCeleryWorker(BaseTurbiniaClient):
-  """Turbinia Celery Worker class.
-
-  Attributes:
-    worker (celery.app): Celery worker app
-  """
-
-  def __init__(self, jobs_blacklist=None, jobs_whitelist=None):
-    """Initialization for celery worker.
-
-    Args:
-      jobs_blacklist (Optional[list[str]]): Jobs we will exclude from running
-      jobs_whitelist (Optional[list[str]]): The only Jobs we will include to run
-    """
-    super(TurbiniaCeleryWorker, self).__init__()
-    # Deregister jobs from blacklist/whitelist.
-    job_manager.JobsManager.DeregisterJobs(jobs_blacklist, jobs_whitelist)
-    disabled_jobs = list(config.DISABLED_JOBS) if config.DISABLED_JOBS else []
-    disabled_jobs = [j.lower() for j in disabled_jobs]
-    # Only actually disable jobs that have not been whitelisted.
-    if jobs_whitelist:
-      disabled_jobs = list(set(disabled_jobs) - set(jobs_whitelist))
-    if disabled_jobs:
-      log.info(
-          'Disabling non-whitelisted jobs configured to be disabled in the '
-          'config file: {0:s}'.format(', '.join(disabled_jobs)))
-      job_manager.JobsManager.DeregisterJobs(jobs_blacklist=disabled_jobs)
-
-    # Check for valid dependencies/directories.
-    dependencies = config.ParseDependencies()
-    if config.DOCKER_ENABLED:
-      check_docker_dependencies(dependencies)
-    check_system_dependencies(config.DEPENDENCIES)
-    check_directory(config.MOUNT_DIR_PREFIX)
-    check_directory(config.OUTPUT_DIR)
-    check_directory(config.TMP_DIR)
-
-    jobs = job_manager.JobsManager.GetJobNames()
-    log.info(
-        'Dependency check complete. The following jobs will be enabled '
-        'for this worker: {0:s}'.format(','.join(jobs)))
-    self.worker = self.task_manager.celery.app
-
-  def start(self):
-    """Start Turbinia Celery Worker."""
-    log.info('Running Turbinia Celery Worker.')
-    self.worker.task(task_manager.task_runner, name='task_runner')
-    argv = ['celery', 'worker', '--loglevel=info', '--pool=solo']
-    self.worker.start(argv)
-
-
-class TurbiniaPsqWorker(object):
-  """Turbinia PSQ Worker class.
-
-  Attributes:
-    worker (psq.Worker): PSQ Worker object
-    psq (psq.Queue): A Task queue object
-
-  Raises:
-    TurbiniaException: When errors occur
-  """
-
-  def __init__(self, jobs_blacklist=None, jobs_whitelist=None):
-    """Initialization for PSQ Worker.
-
-    Args:
-      jobs_blacklist (Optional[list[str]]): Jobs we will exclude from running
-      jobs_whitelist (Optional[list[str]]): The only Jobs we will include to run
-    """
-    config.LoadConfig()
-    psq_publisher = pubsub.PublisherClient()
-    psq_subscriber = pubsub.SubscriberClient()
-    datastore_client = datastore.Client(project=config.TURBINIA_PROJECT)
-    try:
-      self.psq = psq.Queue(
-          psq_publisher, psq_subscriber, config.TURBINIA_PROJECT,
-          name=config.PSQ_TOPIC, storage=psq.DatastoreStorage(datastore_client))
-    except exceptions.GoogleCloudError as e:
-      msg = 'Error creating PSQ Queue: {0:s}'.format(str(e))
-      log.error(msg)
-      raise TurbiniaException(msg)
-
-    # Deregister jobs from blacklist/whitelist.
-    job_manager.JobsManager.DeregisterJobs(jobs_blacklist, jobs_whitelist)
-    disabled_jobs = list(config.DISABLED_JOBS) if config.DISABLED_JOBS else []
-    disabled_jobs = [j.lower() for j in disabled_jobs]
-    # Only actually disable jobs that have not been whitelisted.
-    if jobs_whitelist:
-      disabled_jobs = list(set(disabled_jobs) - set(jobs_whitelist))
-    if disabled_jobs:
-      log.info(
-          'Disabling non-whitelisted jobs configured to be disabled in the '
-          'config file: {0:s}'.format(', '.join(disabled_jobs)))
-      job_manager.JobsManager.DeregisterJobs(jobs_blacklist=disabled_jobs)
-
-    # Check for valid dependencies/directories.
-    dependencies = config.ParseDependencies()
-    if config.DOCKER_ENABLED:
-      check_docker_dependencies(dependencies)
-    check_system_dependencies(dependencies)
-    check_directory(config.MOUNT_DIR_PREFIX)
-    check_directory(config.OUTPUT_DIR)
-    check_directory(config.TMP_DIR)
-
-    jobs = job_manager.JobsManager.GetJobNames()
-    log.info(
-        'Dependency check complete. The following jobs are enabled '
-        'for this worker: {0:s}'.format(','.join(jobs)))
-    log.info('Starting PSQ listener on queue {0:s}'.format(self.psq.name))
-    self.worker = psq.Worker(queue=self.psq)
-
-  def start(self):
-    """Start Turbinia PSQ Worker."""
-    log.info('Running Turbinia PSQ Worker.')
-    self.worker.listen()
+    return self.redis.get_task_data(
+        instance, days, task_id, request_id, group_id, user)

@@ -20,6 +20,7 @@ import os
 import re
 
 from turbinia.evidence import ReportText
+from turbinia.evidence import EvidenceState as state
 from turbinia.lib import text_formatter as fmt
 from turbinia.workers import TurbiniaTask
 from turbinia.workers import Priority
@@ -27,6 +28,8 @@ from turbinia.workers import Priority
 
 class TomcatAnalysisTask(TurbiniaTask):
   """Task to analyze a Tomcat file."""
+
+  REQUIRED_STATES = [state.ATTACHED, state.CONTAINER_MOUNTED]
 
   def run(self, evidence, result):
     """Run the Tomcat analysis worker.
@@ -102,7 +105,7 @@ class TomcatAnalysisTask(TurbiniaTask):
       count += 1
 
     if findings:
-      msg = 'Tomcat analysis found {0:d} results'.format(count)
+      msg = f'Tomcat analysis found {count:d} results'
       findings.insert(0, fmt.heading4(fmt.bold(msg)))
       report = '\n'.join(findings)
       return (report, Priority.HIGH, msg)

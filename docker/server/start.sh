@@ -6,4 +6,10 @@ then
     echo "${TURBINIA_CONF}" | base64 -d > /etc/turbinia/turbinia.conf
 fi
 
-/usr/local/bin/turbiniactl -L /var/log/turbinia/turbinia.log -S -o /var/lib/turbinia server
+# Use log file path from environment variable is it exists, else get the path from the config.
+if [ ! -z ${TURBINIA_LOG_FILE+x} ]
+then
+    /usr/local/bin/turbiniactl $TURBINIA_EXTRA_ARGS -L $TURBINIA_LOG_FILE server
+else
+    /usr/local/bin/turbiniactl $TURBINIA_EXTRA_ARGS server
+fi

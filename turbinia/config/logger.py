@@ -16,13 +16,20 @@
 
 from __future__ import unicode_literals
 import logging
+
 import warnings
+import logging.handlers
+import os
+import sys
 
 from turbinia import config
 from turbinia import TurbiniaException
 
+# Environment variable to look for node name in
+ENVNODENAME = 'NODE_NAME'
 
-def setup(need_file_handler=True, need_stream_handler=True):
+
+def setup(need_file_handler=True, need_stream_handler=True, log_file_path=None):
   """Set up logging parameters.
 
   This will also set the root logger, which is the default logger when a named
@@ -57,18 +64,29 @@ def setup(need_file_handler=True, need_stream_handler=True):
       config.LoadConfig()
     except TurbiniaException as exception:
       print(
-          'Could not load config file ({0!s}).\n{1:s}'.format(
-              exception, config.CONFIG_MSG))
+          f'Could not load config file ({exception!s}).\n{config.CONFIG_MSG:s}')
       sys.exit(1)
 
-    file_handler = logging.FileHandler(config.LOG_FILE)
+    # Check if a user specified log path was provided else create default path
+    if not log_file_path:
+      # Create LOG directory if it doesn't exist
+      if not os.path.exists(config.LOG_DIR):
+        os.mkdir(config.LOG_DIR)
+      log_name = os.uname().nodename
+      # Check if NODE_NAME available for GKE setups
+      if ENVNODENAME in os.environ:
+        log_name = log_name + f'.{os.environ[ENVNODENAME]!s}'
+      log_file_path = os.path.join(config.LOG_DIR, log_name) + '.log'
+
+    file_handler = logging.FileHandler(log_file_path)
     formatter = logging.Formatter('%(asctime)s:%(levelname)s:%(message)s')
     file_handler.setFormatter(formatter)
     file_handler.setLevel(logging.DEBUG)
     logger.addHandler(file_handler)
 
-  console_handler = logging.StreamHandler()
-  formatter = logging.Formatter('[%(levelname)s] %(message)s')
+  console_handler = logging.StreamHandler(sys.stdout)
+  formatter = logging.Formatter(
+      '%(asctime)s [%(levelname)s] %(message)s', "%Y-%m-%d %H:%M:%S")
   console_handler.setFormatter(formatter)
   if need_stream_handler:
     logger.addHandler(console_handler)
@@ -82,3 +100,6 @@ def setup(need_file_handler=True, need_stream_handler=True):
   root_log.addHandler(console_handler)
   if need_file_handler:
     root_log.addHandler(file_handler)
+
+  # Set filelock logging to ERROR due to log spam
+  logging.getLogger("filelock").setLevel(logging.ERROR)

@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+#-*- coding: utf-8 -*-
 # Copyright 2016 Google Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,15 +17,23 @@
 from __future__ import unicode_literals, absolute_import
 
 import logging
+from datetime import datetime
 import time
+import uuid
+
+from prometheus_client import Counter
 
 import turbinia
 from turbinia import workers
 from turbinia import evidence
 from turbinia import config
+from turbinia import job_utils
 from turbinia import state_manager
+from turbinia import task_utils
 from turbinia import TurbiniaException
 from turbinia.jobs import manager as jobs_manager
+from turbinia.lib import recipe_helpers
+from turbinia.workers.abort import AbortTask
 
 config.LoadConfig()
 if config.TASK_MANAGER.lower() == 'psq':
@@ -39,12 +47,37 @@ if config.TASK_MANAGER.lower() == 'psq':
 elif config.TASK_MANAGER.lower() == 'celery':
   from celery import states as celery_states
 
-  from turbinia import celery as turbinia_celery
+  from turbinia import tcelery as turbinia_celery
 
 log = logging.getLogger('turbinia')
 
 PSQ_TASK_TIMEOUT_SECONDS = 604800
 PSQ_QUEUE_WAIT_SECONDS = 2
+# The amount of time in seconds that the Server will wait in addition to the
+# Job/Task timeout value before it times out a given Task. This is to make sure
+# that the Server doesn't time out the Task before the Worker has a chance to
+# and should account for the Task scheduling and setup time that happens before
+# the Task starts.
+SERVER_TASK_TIMEOUT_BUFFER = 86400
+
+# Define metrics
+turbinia_server_tasks_total = Counter(
+    'turbinia_server_tasks_total', 'Turbinia Server Total Tasks')
+turbinia_server_tasks_completed_total = Counter(
+    'turbinia_server_tasks_completed_total',
+    'Total number of completed server tasks')
+turbinia_jobs_total = Counter(
+    'turbinia_jobs_total', 'Total number jobs created')
+turbinia_jobs_completed_total = Counter(
+    'turbinia_jobs_completed_total', 'Total number jobs resolved')
+turbinia_server_request_total = Counter(
+    'turbinia_server_request_total', 'Total number of requests received.')
+turbinia_server_task_timeout_total = Counter(
+    'turbinia_server_task_timeout_total',
+    'Total number of Tasks that have timed out on the Server.')
+turbinia_result_success_invalid = Counter(
+    'turbinia_result_success_invalid',
+    'The result returned from the Task had an invalid success status of None')
 
 
 def get_task_manager():
@@ -63,27 +96,11 @@ def get_task_manager():
   elif config.TASK_MANAGER.lower() == 'celery':
     return CeleryTaskManager()
   else:
-    msg = 'Task Manager type "{0:s}" not implemented'.format(
-        config.TASK_MANAGER)
+    msg = f'Task Manager type "{config.TASK_MANAGER:s}" not implemented'
     raise turbinia.TurbiniaException(msg)
 
 
-def task_runner(obj, *args, **kwargs):
-  """Wrapper function to run specified TurbiniaTask object.
-
-  Args:
-    obj: An instantiated TurbiniaTask object.
-    *args: Any Args to pass to obj.
-    **kwargs: Any keyword args to pass to obj.
-
-  Returns:
-    Output from TurbiniaTask (should be TurbiniaTaskResult).
-  """
-  obj = workers.TurbiniaTask.deserialize(obj)
-  return obj.run_wrapper(*args, **kwargs)
-
-
-class BaseTaskManager(object):
+class BaseTaskManager:
   """Class to manage Turbinia Tasks.
 
   Handles incoming new Evidence messages, adds new Tasks to the queue and
@@ -121,17 +138,17 @@ class BaseTaskManager(object):
     """
     raise NotImplementedError
 
-  def setup(self, jobs_blacklist=None, jobs_whitelist=None, *args, **kwargs):
+  def setup(self, jobs_denylist=None, jobs_allowlist=None, *args, **kwargs):
     """Does setup of Task manager and its dependencies.
 
     Args:
-      jobs_blacklist (list): Jobs that will be excluded from running
-      jobs_whitelist (list): The only Jobs will be included to run
+      jobs_denylist (list): Jobs that will be excluded from running
+      jobs_allowlist (list): The only Jobs will be included to run
     """
     self._backend_setup(*args, **kwargs)
     job_names = jobs_manager.JobsManager.GetJobNames()
-    if jobs_blacklist or jobs_whitelist:
-      selected_jobs = jobs_blacklist or jobs_whitelist
+    if jobs_denylist or jobs_allowlist:
+      selected_jobs = jobs_denylist or jobs_allowlist
       for job in selected_jobs:
         if job.lower() not in job_names:
           msg = (
@@ -140,25 +157,49 @@ class BaseTaskManager(object):
           log.error(msg)
           raise TurbiniaException(msg)
       log.info(
-          'Filtering Jobs with whitelist {0!s} and blacklist {1!s}'.format(
-              jobs_whitelist, jobs_blacklist))
+          'Filtering Jobs with allowlist {0!s} and denylist {1!s}'.format(
+              jobs_allowlist, jobs_denylist))
       job_names = jobs_manager.JobsManager.FilterJobNames(
-          job_names, jobs_blacklist, jobs_whitelist)
+          job_names, jobs_denylist, jobs_allowlist)
 
-    # Disable any jobs from the config that were not previously whitelisted.
+    # Disable any jobs from the config that were not previously allowlisted.
     disabled_jobs = list(config.DISABLED_JOBS) if config.DISABLED_JOBS else []
     disabled_jobs = [j.lower() for j in disabled_jobs]
-    if jobs_whitelist:
-      disabled_jobs = list(set(disabled_jobs) - set(jobs_whitelist))
+    if jobs_allowlist:
+      disabled_jobs = list(set(disabled_jobs) - set(jobs_allowlist))
     if disabled_jobs:
       log.info(
-          'Disabling non-whitelisted jobs configured to be disabled in the '
+          'Disabling non-allowlisted jobs configured to be disabled in the '
           'config file: {0:s}'.format(', '.join(disabled_jobs)))
       job_names = jobs_manager.JobsManager.FilterJobNames(
           job_names, disabled_jobs, [])
 
     self.jobs = [job for _, job in jobs_manager.JobsManager.GetJobs(job_names)]
-    log.debug('Registered job list: {0:s}'.format(str(job_names)))
+    dependencies = config.ParseDependencies()
+    job_utils.register_job_timeouts(dependencies)
+    log.debug(f'Registered job list: {str(job_names):s}')
+
+  def abort_request(self, request_id, requester, evidence_name, message):
+    """Abort the request by creating an AbortTask.
+
+    When there is a fatal error processing the request such that we can't
+    continue, an AbortTask will be created with the error message and is written
+    directly to the state database. This way the client will get a reasonable
+    error in response to the failure.
+    
+    Args:
+      request_id(str): The request ID.
+      requester(str): The username of the requester.
+      evidence_name(str): Name of the Evidence requested to be processed.
+      message(str): The error message to abort the request with.
+    """
+    abort_task = AbortTask(request_id=request_id, requester=requester)
+    result = workers.TurbiniaTaskResult(
+        request_id=request_id, no_output_manager=True)
+    result.status = f'Processing request for {evidence_name:s} aborted: {message:s}'
+    result.successful = False
+    abort_task.result = result
+    self.state_manager.update_task(abort_task)
 
   def add_evidence(self, evidence_):
     """Adds new evidence and creates tasks to process it.
@@ -174,16 +215,18 @@ class BaseTaskManager(object):
     if not self.jobs:
       raise turbinia.TurbiniaException(
           'Jobs must be registered before evidence can be added')
-    log.info('Adding new evidence: {0:s}'.format(str(evidence_)))
+    log.info(f'Adding new evidence: {str(evidence_):s}')
     job_count = 0
-    jobs_whitelist = evidence_.config.get('jobs_whitelist', [])
-    jobs_blacklist = evidence_.config.get('jobs_blacklist', [])
-    if jobs_blacklist or jobs_whitelist:
+    jobs_list = []
+
+    jobs_allowlist = evidence_.config['globals'].get('jobs_allowlist', [])
+    jobs_denylist = evidence_.config['globals'].get('jobs_denylist', [])
+    if jobs_denylist or jobs_allowlist:
       log.info(
-          'Filtering Jobs with whitelist {0!s} and blacklist {1!s}'.format(
-              jobs_whitelist, jobs_blacklist))
+          'Filtering Jobs with allowlist {0!s} and denylist {1!s}'.format(
+              jobs_allowlist, jobs_denylist))
       jobs_list = jobs_manager.JobsManager.FilterJobObjects(
-          self.jobs, jobs_blacklist, jobs_whitelist)
+          self.jobs, jobs_denylist, jobs_allowlist)
     else:
       jobs_list = self.jobs
 
@@ -195,22 +238,37 @@ class BaseTaskManager(object):
       # Doing a strict type check here for now until we can get the above
       # comment figured out.
       # pylint: disable=unidiomatic-typecheck
-      if [True for t in job.evidence_input if type(evidence_) == t]:
+      job_applicable = [
+          True for t in job.evidence_input if type(evidence_) == t
+      ]
+
+      if job_applicable:
         job_instance = job(
             request_id=evidence_.request_id, evidence_config=evidence_.config)
-        self.running_jobs.append(job_instance)
-        log.info(
-            'Adding {0:s} job to process {1:s}'.format(
-                job_instance.name, evidence_.name))
-        job_count += 1
+
         for task in job_instance.create_tasks([evidence_]):
           self.add_task(task, job_instance, evidence_)
+
+        self.running_jobs.append(job_instance)
+        log.info(
+            f'Adding {job_instance.name:s} job to process {evidence_.name:s}')
+        job_count += 1
+        turbinia_jobs_total.inc()
+
+    if isinstance(evidence_, evidence.Evidence):
+      try:
+        evidence_.validate_attributes()
+      except TurbiniaException as exception:
+        log.error(f'Error writing new evidence to redis: {exception}')
+      else:
+        self.state_manager.write_evidence(evidence_.serialize(json_values=True))
 
     if not job_count:
       log.warning(
           'No Jobs/Tasks were created for Evidence [{0:s}]. '
-          'Jobs may need to be configured to allow this type of '
-          'Evidence as input'.format(str(evidence_)))
+          'Request or recipe parsing may have failed, or Jobs may need to be '
+          'configured to allow this type of Evidence as input'.format(
+              str(evidence_)))
 
   def check_done(self):
     """Checks if we have any outstanding tasks.
@@ -259,6 +317,32 @@ class BaseTaskManager(object):
 
     return request_finalized and self.check_request_done(request_id)
 
+  def check_task_timeout(self, task):
+    """Checks whether a Task has timed out.
+
+    Tasks should normally be timed out by the Worker, but if there was some
+    kind of fatal error on the Worker or other problem in the Task that
+    prevented the results from returning then we will time out on the Server
+    side as well and abandon the Task.
+
+    Args:
+      task(TurbiniaTask): The Task to check for the timeout.
+
+    Returns:
+      int: If the Task has timed out, this is the time in seconds, otherwise if
+          the Task hasn't timed out it will return 0.
+    """
+    job = self.get_job(task.job_id)
+    timeout_target = jobs_manager.JobsManager.GetTimeoutValue(job.name)
+    task_runtime = datetime.now() - task.start_time
+    task_runtime = int(task_runtime.total_seconds())
+    if task_runtime > timeout_target + SERVER_TASK_TIMEOUT_BUFFER:
+      timeout = task_runtime
+    else:
+      timeout = 0
+
+    return timeout
+
   def get_evidence(self):
     """Checks for new evidence to process.
 
@@ -303,7 +387,7 @@ class BaseTaskManager(object):
     final_evidence = evidence.EvidenceCollection()
     final_evidence.request_id = request_id
     self.running_jobs.append(final_job)
-
+    turbinia_jobs_total.inc()
     # Gather evidence created by every Job in the request.
     for running_job in self.running_jobs:
       if running_job.request_id == request_id:
@@ -317,6 +401,7 @@ class BaseTaskManager(object):
 
     Args:
       task: An instantiated Turbinia Task
+      job: The TurbiniaJob that created this Task.
       evidence_: An Evidence object to be processed.
     """
     if evidence_.request_id:
@@ -330,14 +415,22 @@ class BaseTaskManager(object):
       return
 
     evidence_.config = job.evidence.config
+    task.evidence_name = evidence_.name
     task.base_output_dir = config.OUTPUT_DIR
-    task.requester = evidence_.config.get('requester')
+    task.requester = evidence_.config.get('globals', {}).get('requester')
+    task.group_name = evidence_.config.get('globals', {}).get('group_name')
+    task.reason = evidence_.config.get('globals', {}).get('reason')
+    task.all_args = evidence_.config.get('globals', {}).get('all_args')
+    task.group_id = evidence_.config.get('globals', {}).get('group_id')
     if job:
       task.job_id = job.id
       task.job_name = job.name
       job.tasks.append(task)
     self.state_manager.write_new_task(task)
     self.enqueue_task(task, evidence_)
+    turbinia_server_tasks_total.inc()
+    if task.id not in evidence_.tasks:
+      evidence_.tasks.append(task.id)
 
   def remove_jobs(self, request_id):
     """Removes the all Jobs for the given request ID.
@@ -369,6 +462,7 @@ class BaseTaskManager(object):
 
     if remove_job:
       self.running_jobs.remove(remove_job)
+      turbinia_jobs_completed_total.inc()
     return bool(remove_job)
 
   def enqueue_task(self, task, evidence_):
@@ -396,6 +490,19 @@ class BaseTaskManager(object):
     Returns:
       TurbiniaJob|None: The Job for the processed task, else None
     """
+    if task_result.successful is None:
+      log.error(
+          'Task {0:s} from {1:s} returned invalid success status "None". '
+          'Setting this to False so the client knows the Task is complete. '
+          'Usually this means that the Task returning the TurbiniaTaskResult '
+          'did not call the close() method on it.'.format(
+              task_result.task_name, task_result.worker_name))
+      turbinia_result_success_invalid.inc()
+      task_result.successful = False
+      if task_result.status:
+        task_result.status = (
+            task_result.status + ' (Success status forcefully set to False)')
+
     if not task_result.successful:
       log.error(
           'Task {0:s} from {1:s} was not successful'.format(
@@ -415,8 +522,8 @@ class BaseTaskManager(object):
     job = self.get_job(task_result.job_id)
     if not job:
       log.warning(
-          'Received task results for unknown Job from Task ID {0:s}'.format(
-              task_result.task_id))
+          f'Received task results for unknown Job from Task ID {task_result.task_id:s}'
+      )
 
     # Reprocess new evidence and save instance for later consumption by finalize
     # tasks.
@@ -448,18 +555,17 @@ class BaseTaskManager(object):
       job (TurbiniaJob): The Job to process
       task (TurbiniaTask): The Task that just completed.
     """
-    log.debug(
-        'Processing Job {0:s} for completed Task {1:s}'.format(
-            job.name, task.id))
+    log.debug(f'Processing Job {job.name:s} for completed Task {task.id:s}')
     self.state_manager.update_task(task)
     job.remove_task(task.id)
+    turbinia_server_tasks_completed_total.inc()
     if job.check_done() and not (job.is_finalize_job or task.is_finalize_task):
-      log.debug(
-          'Job {0:s} completed, creating Job finalize tasks'.format(job.name))
+      log.debug(f'Job {job.name:s} completed, creating Job finalize tasks')
       final_task = job.create_final_task()
       if final_task:
         final_task.is_finalize_task = True
         self.add_task(final_task, job, job.evidence)
+        turbinia_server_tasks_total.inc()
     elif job.check_done() and job.is_finalize_job:
       job.is_finalized = True
 
@@ -495,8 +601,8 @@ class BaseTaskManager(object):
           job = self.process_result(task.result)
           if job:
             self.process_job(job, task)
+        self.state_manager.update_task(task)
 
-      [self.state_manager.update_task(t) for t in self.tasks]
       if config.SINGLE_RUN and self.check_done():
         log.info('No more tasks to process.  Exiting now.')
         return
@@ -505,6 +611,30 @@ class BaseTaskManager(object):
         break
 
       time.sleep(config.SLEEP_TIME)
+
+  def timeout_task(self, task, timeout):
+    """Sets status and result data for timed out Task.
+
+    Args:
+      task(TurbiniaTask): The Task that will be timed out.
+      timeout(int): The timeout value that has been reached.
+
+    Returns:
+      TurbiniaTask: The updated Task.
+    """
+    result = workers.TurbiniaTaskResult(
+        request_id=task.request_id, no_output_manager=True,
+        no_state_manager=True)
+    result.setup(task)
+    result.status = (
+        'Task {0:s} timed out on the Server and was auto-closed after '
+        '{1:d} seconds'.format(task.name, timeout))
+    result.successful = False
+    result.closed = True
+    task.result = result
+    turbinia_server_task_timeout_total.inc()
+
+    return task
 
 
 class CeleryTaskManager(BaseTaskManager):
@@ -528,7 +658,8 @@ class CeleryTaskManager(BaseTaskManager):
     self.celery.setup()
     self.kombu = turbinia_celery.TurbiniaKombu(config.KOMBU_CHANNEL)
     self.kombu.setup()
-    self.celery_runner = self.celery.app.task(task_runner, name="task_runner")
+    self.celery_runner = self.celery.app.task(
+        task_utils.task_runner, name="task_runner")
 
   def process_tasks(self):
     """Determine the current state of our tasks.
@@ -538,22 +669,38 @@ class CeleryTaskManager(BaseTaskManager):
     """
     completed_tasks = []
     for task in self.tasks:
+      check_timeout = False
       celery_task = task.stub
       if not celery_task:
-        log.debug('Task {0:s} not yet created'.format(task.stub.task_id))
+        log.debug(f'Task {task.stub.task_id:s} not yet created')
+        check_timeout = True
       elif celery_task.status == celery_states.STARTED:
-        log.debug('Task {0:s} not finished'.format(celery_task.id))
+        log.debug(f'Task {celery_task.id:s} not finished')
+        check_timeout = True
       elif celery_task.status == celery_states.FAILURE:
-        log.warning('Task {0:s} failed.'.format(celery_task.id))
+        log.warning(f'Task {celery_task.id:s} failed.')
         completed_tasks.append(task)
       elif celery_task.status == celery_states.SUCCESS:
         task.result = workers.TurbiniaTaskResult.deserialize(celery_task.result)
         completed_tasks.append(task)
       else:
-        log.debug('Task {0:s} status unknown'.format(celery_task.id))
+        check_timeout = True
+        log.debug(f'Task {celery_task.id:s} status unknown')
+
+      # For certain Task states we want to check whether the Task has timed out
+      # or not.
+      if check_timeout:
+        timeout = self.check_task_timeout(task)
+        if timeout:
+          log.warning(
+              'Task {0:s} timed out on server after {1:d} seconds. '
+              'Auto-closing Task.'.format(celery_task.id, timeout))
+          task = self.timeout_task(task, timeout)
+          completed_tasks.append(task)
 
     outstanding_task_count = len(self.tasks) - len(completed_tasks)
-    log.info('{0:d} Tasks still outstanding.'.format(outstanding_task_count))
+    if outstanding_task_count > 0:
+      log.info(f'{outstanding_task_count:d} Tasks still outstanding.')
     return completed_tasks
 
   def get_evidence(self):
@@ -565,21 +712,43 @@ class CeleryTaskManager(BaseTaskManager):
     requests = self.kombu.check_messages()
     evidence_list = []
     for request in requests:
+      #todo(igormr): Create request object in redis
       for evidence_ in request.evidence:
         if not evidence_.request_id:
           evidence_.request_id = request.request_id
-        evidence_.config = request.recipe
-        evidence_.config['requester'] = request.requester
-        log.info(
-            'Received evidence [{0:s}] from Kombu message.'.format(
-                str(evidence_)))
-        evidence_list.append(evidence_)
+
+        log.info(f'Received evidence [{str(evidence_):s}] from Kombu message.')
+
+        success, message = recipe_helpers.validate_recipe(request.recipe)
+        if not success:
+          self.abort_request(
+              evidence_.request_id, request.requester, evidence_.name, message)
+        else:
+          evidence_.config = request.recipe
+          evidence_.config['globals']['requester'] = request.requester
+          evidence_.config['globals']['group_name'] = request.group_name
+          evidence_.config['globals']['reason'] = request.reason
+          evidence_.config['globals']['all_args'] = request.all_args
+
+          # A recipe could contain a group_id key so that tasks can be grouped
+          # together, but this is optional. If the recipe doesn't specify a
+          # group_id, then we grab it from the request object itself.
+          try:
+            recipe_group_id = request.recipe['globals']['group_id']
+            if recipe_group_id:
+              evidence_.config['globals']['group_id'] = recipe_group_id
+          except KeyError:
+            evidence_.config['globals']['group_id'] = request.group_id
+
+          evidence_list.append(evidence_)
+      turbinia_server_request_total.inc()
+
     return evidence_list
 
   def enqueue_task(self, task, evidence_):
     log.info(
-        'Adding Celery task {0:s} with evidence {1:s} to queue'.format(
-            task.name, evidence_.name))
+        f'Adding Celery task {task.name:s} with evidence {evidence_.name:s} to queue'
+    )
     task.stub = self.celery_runner.delay(
         task.serialize(), evidence_.serialize())
 
@@ -614,39 +783,55 @@ class PSQTaskManager(BaseTaskManager):
     self.server_pubsub = turbinia_pubsub.TurbiniaPubSub(config.PUBSUB_TOPIC)
     if server:
       self.server_pubsub.setup_subscriber()
+      psq_publisher = pubsub.PublisherClient()
+      psq_subscriber = pubsub.SubscriberClient()
+      datastore_client = datastore.Client(project=config.TURBINIA_PROJECT)
+      try:
+        self.psq = psq.Queue(
+            psq_publisher, psq_subscriber, config.TURBINIA_PROJECT,
+            name=config.PSQ_TOPIC,
+            storage=psq.DatastoreStorage(datastore_client))
+      except exceptions.GoogleCloudError as exception:
+        msg = f'Error creating PSQ Queue: {str(exception):s}'
+        log.error(msg)
+        raise turbinia.TurbiniaException(msg)
     else:
       self.server_pubsub.setup_publisher()
-    psq_publisher = pubsub.PublisherClient()
-    psq_subscriber = pubsub.SubscriberClient()
-    datastore_client = datastore.Client(project=config.TURBINIA_PROJECT)
-    try:
-      self.psq = psq.Queue(
-          psq_publisher, psq_subscriber, config.TURBINIA_PROJECT,
-          name=config.PSQ_TOPIC, storage=psq.DatastoreStorage(datastore_client))
-    except exceptions.GoogleCloudError as e:
-      msg = 'Error creating PSQ Queue: {0:s}'.format(str(e))
-      log.error(msg)
-      raise turbinia.TurbiniaException(msg)
 
   def process_tasks(self):
     completed_tasks = []
     for task in self.tasks:
+      check_timeout = False
       psq_task = task.stub.get_task()
       # This handles tasks that have failed at the PSQ layer.
       if not psq_task:
-        log.debug('Task {0:s} not yet created'.format(task.stub.task_id))
+        check_timeout = True
+        log.debug(f'Task {task.stub.task_id:s} not yet created')
       elif psq_task.status not in (psq.task.FINISHED, psq.task.FAILED):
-        log.debug('Task {0:s} not finished'.format(psq_task.id))
+        check_timeout = True
+        log.debug(f'Task {psq_task.id:s} not finished')
       elif psq_task.status == psq.task.FAILED:
-        log.warning('Task {0:s} failed.'.format(psq_task.id))
+        log.warning(f'Task {psq_task.id:s} failed.')
         completed_tasks.append(task)
       else:
         task.result = workers.TurbiniaTaskResult.deserialize(
             task.stub.result(timeout=PSQ_TASK_TIMEOUT_SECONDS))
         completed_tasks.append(task)
 
+      # For certain Task states we want to check whether the Task has timed out
+      # or not.
+      if check_timeout:
+        timeout = self.check_task_timeout(task)
+        if timeout:
+          log.warning(
+              'Task {0:s} timed on server out after {1:d} seconds. Auto-closing Task.'
+              .format(task.id, timeout))
+          task = self.timeout_task(task, timeout)
+          completed_tasks.append(task)
+
     outstanding_task_count = len(self.tasks) - len(completed_tasks)
-    log.info('{0:d} Tasks still outstanding.'.format(outstanding_task_count))
+    if outstanding_task_count > 0:
+      log.info(f'{outstanding_task_count:d} Tasks still outstanding.')
     return completed_tasks
 
   def get_evidence(self):
@@ -656,18 +841,25 @@ class PSQTaskManager(BaseTaskManager):
       for evidence_ in request.evidence:
         if not evidence_.request_id:
           evidence_.request_id = request.request_id
-        evidence_.config = request.recipe
-        evidence_.config['requester'] = request.requester
-        log.info(
-            'Received evidence [{0:s}] from PubSub message.'.format(
-                str(evidence_)))
-        evidence_list.append(evidence_)
+
+        log.info(f'Received evidence [{str(evidence_):s}] from PubSub message.')
+
+        success, message = recipe_helpers.validate_recipe(request.recipe)
+        if not success:
+          self.abort_request(
+              evidence_.request_id, request.requester, evidence_.name, message)
+        else:
+          evidence_.config = request.recipe
+          evidence_.config['globals']['requester'] = request.requester
+          evidence_list.append(evidence_)
+      turbinia_server_request_total.inc()
+
     return evidence_list
 
   def enqueue_task(self, task, evidence_):
     log.info(
-        'Adding PSQ task {0:s} with evidence {1:s} to queue'.format(
-            task.name, evidence_.name))
+        f'Adding PSQ task {task.name:s} with evidence {evidence_.name:s} to queue'
+    )
     task.stub = self.psq.enqueue(
-        task_runner, task.serialize(), evidence_.serialize())
+        task_utils.task_runner, task.serialize(), evidence_.serialize())
     time.sleep(PSQ_QUEUE_WAIT_SECONDS)

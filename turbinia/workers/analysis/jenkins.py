@@ -20,6 +20,7 @@ import os
 import re
 
 from turbinia import TurbiniaException
+from turbinia.evidence import EvidenceState as state
 from turbinia.evidence import ReportText
 from turbinia.lib import text_formatter as fmt
 from turbinia.workers import TurbiniaTask
@@ -30,6 +31,14 @@ from turbinia.lib.utils import bruteforce_password_hashes
 
 class JenkinsAnalysisTask(TurbiniaTask):
   """Task to analyze a Jenkins install."""
+
+  REQUIRED_STATES = [state.ATTACHED, state.CONTAINER_MOUNTED]
+
+  TASK_CONFIG = {
+      # This is the length of time in seconds that the collected passwords will
+      # be bruteforced.
+      'bruteforce_timeout': 300
+  }
 
   def run(self, evidence, result):
     """Run the Jenkins worker.
@@ -54,14 +63,16 @@ class JenkinsAnalysisTask(TurbiniaTask):
     # than we need.  Tracked in https://github.com/google/turbinia/issues/402
     try:
       collected_artifacts = extract_files(
-          file_name='config.xml', disk_path=evidence.local_path,
-          output_dir=os.path.join(self.output_dir, 'artifacts'))
-    except TurbiniaException as e:
-      result.close(self, success=False, status=str(e))
+          file_name='config.xml',
+          disk_path=evidence.local_path, output_dir=os.path.join(
+              self.output_dir, 'artifacts'), credentials=evidence.credentials)
+    except TurbiniaException as exception:
+      result.close(self, success=False, status=str(exception))
       return result
 
     jenkins_artifacts = []
-    jenkins_re = re.compile(r'^.*jenkins[^\/]*(\/users\/[^\/]+)*\/config\.xml$')
+    jenkins_re = re.compile(
+        r'^.*jenkins[^\/]*(\/home)?(\/users\/[^\/]+)*\/config\.xml$')
     for collected_artifact in collected_artifacts:
       if re.match(jenkins_re, collected_artifact):
         jenkins_artifacts.append(collected_artifact)
@@ -80,7 +91,9 @@ class JenkinsAnalysisTask(TurbiniaTask):
 
       credentials.extend(extracted_credentials)
 
-    (report, priority, summary) = self.analyze_jenkins(version, credentials)
+    timeout = self.task_config.get('bruteforce_timeout')
+    (report, priority, summary) = self.analyze_jenkins(
+        version, credentials, timeout=timeout)
     output_evidence.text_data = report
     result.report_data = report
     result.report_priority = priority
@@ -140,12 +153,13 @@ class JenkinsAnalysisTask(TurbiniaTask):
     return credentials
 
   @staticmethod
-  def analyze_jenkins(version, credentials):
+  def analyze_jenkins(version, credentials, timeout=300):
     """Analyses a Jenkins configuration.
 
     Args:
       version (str): Version of Jenkins.
       credentials (list): of tuples with username and password hash.
+      timeout (int): Time in seconds to run password bruteforcing.
 
     Returns:
       Tuple(
@@ -158,19 +172,21 @@ class JenkinsAnalysisTask(TurbiniaTask):
     summary = ''
     priority = Priority.LOW
     credentials_registry = {hash: username for username, hash in credentials}
-    # TODO: Add timeout parameter when dynamic configuration is ready.
-    # Ref: https://github.com/google/turbinia/issues/244
-    weak_passwords = bruteforce_password_hashes(credentials_registry.keys())
+
+    # '3200' is "bcrypt $2*$, Blowfish (Unix)"
+    weak_passwords = bruteforce_password_hashes(
+        credentials_registry.keys(), tmp_dir=None, timeout=timeout,
+        extra_args='-m 3200')
 
     if not version:
       version = 'Unknown'
-    report.append(fmt.bullet('Jenkins version: {0:s}'.format(version)))
+    report.append(fmt.bullet(f'Jenkins version: {version:s}'))
 
     if weak_passwords:
       priority = Priority.CRITICAL
       summary = 'Jenkins analysis found potential issues'
       report.insert(0, fmt.heading4(fmt.bold(summary)))
-      line = '{0:n} weak password(s) found:'.format(len(weak_passwords))
+      line = f'{len(weak_passwords):n} weak password(s) found:'
       report.append(fmt.bullet(fmt.bold(line)))
       for password_hash, plaintext in weak_passwords:
         line = 'User "{0:s}" with password "{1:s}"'.format(

@@ -19,6 +19,7 @@ from __future__ import unicode_literals
 import os
 import re
 
+from turbinia.evidence import EvidenceState as state
 from turbinia.evidence import ReportText
 from turbinia.lib import text_formatter as fmt
 from turbinia.workers import TurbiniaTask
@@ -27,6 +28,8 @@ from turbinia.workers import Priority
 
 class RedisAnalysisTask(TurbiniaTask):
   """Task to analyze a Redis configuration file."""
+
+  REQUIRED_STATES = [state.ATTACHED, state.CONTAINER_MOUNTED]
 
   def run(self, evidence, result):
     """Run the Redis configuration analysis worker.
@@ -54,7 +57,7 @@ class RedisAnalysisTask(TurbiniaTask):
     result.report_data = report
 
     # Write the report to the output file.
-    with open(output_file_path, 'w') as fh:
+    with open(output_file_path, 'wb') as fh:
       fh.write(output_evidence.text_data.encode('utf-8'))
 
     # Add the resulting evidence to the result object.

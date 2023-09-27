@@ -17,14 +17,16 @@
 from __future__ import unicode_literals
 
 import os
-from tempfile import NamedTemporaryFile
 
 from turbinia.evidence import FilteredTextFile
 from turbinia.workers import TurbiniaTask
+from turbinia.lib.file_helpers import write_list_to_temp_file
 
 
 class GrepTask(TurbiniaTask):
   """Filter input based on extended regular expression patterns."""
+
+  TASK_CONFIG = {'filter_patterns': []}
 
   def run(self, evidence, result):
     """Run grep binary.
@@ -37,39 +39,32 @@ class GrepTask(TurbiniaTask):
         TurbiniaTaskResult object.
     """
 
-    patterns = evidence.config.get('filter_patterns')
+    patterns = self.task_config.get('filter_patterns')
     if not patterns:
-      result.close(
-          self, success=False, status='No patterns supplied, exit task')
+      result.close(self, success=True, status='No patterns supplied, exit task')
       return result
 
-    # Create temporary file to write patterns to.
-    # Used as input to grep (-f).
-    with NamedTemporaryFile(dir=self.output_dir, delete=False) as fh:
-      patterns_file_path = fh.name
-      fh.write('\n'.join(patterns))
+    patterns_file_path = write_list_to_temp_file(patterns)
 
     # Create a path that we can write the new file to.
     base_name = os.path.basename(evidence.local_path)
-    output_file_path = os.path.join(
-        self.output_dir, '{0:s}.filtered'.format(base_name))
+    output_file_path = os.path.join(self.output_dir, f'{base_name:s}.filtered')
 
     output_evidence = FilteredTextFile(source_path=output_file_path)
     cmd = 'grep -E -b -n -f {0:s} {1:s} > {2:s}'.format(
         patterns_file_path, evidence.local_path, output_file_path)
 
-    result.log('Running [{0:s}]'.format(cmd))
+    result.log(f'Running [{cmd:s}]')
     ret, result = self.execute(
         cmd, result, new_evidence=[output_evidence], shell=True,
         success_codes=[0, 1])
 
     # Grep returns 0 on success and 1 if no results are found.
     if ret == 0:
-      status = 'Grep Task found results in {0:s}'.format(evidence.name)
+      status = f'Grep Task found results in {evidence.name:s}'
       result.close(self, success=True, status=status)
     elif ret == 1:
-      status = 'Grep Task did not find any results in {0:s}'.format(
-          evidence.name)
+      status = f'Grep Task did not find any results in {evidence.name:s}'
       result.close(self, success=True, status=status)
     else:
       result.close(self, success=False)

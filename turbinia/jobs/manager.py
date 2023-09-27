@@ -18,61 +18,63 @@ from __future__ import unicode_literals
 
 from turbinia import TurbiniaException
 
+DEFAULT_TIMEOUT = 7200
 
-class JobsManager(object):
+
+class JobsManager:
   """The jobs manager."""
 
   _job_classes = {}
 
   @classmethod
-  def FilterJobNames(cls, job_names, jobs_blacklist=None, jobs_whitelist=None):
+  def FilterJobNames(cls, job_names, jobs_denylist=None, jobs_allowlist=None):
     """Filters a list of job names against white/black lists.
 
-    jobs_whitelist and jobs_blacklist must not be specified at the same time.
+    jobs_allowlist and jobs_denylist must not be specified at the same time.
 
     Args:
       job_names (list[str]): The names of the job_names to filter.
-      jobs_blacklist (Optional[list[str]]): Job names to exclude.
-      jobs_whitelist (Optional[list[str]]): Job names to include.
+      jobs_denylist (Optional[list[str]]): Job names to exclude.
+      jobs_allowlist (Optional[list[str]]): Job names to include.
 
     Returns:
      list[str]: Job names
 
     Raises:
-      TurbiniaException if both jobs_blacklist and jobs_whitelist are specified.
+      TurbiniaException if both jobs_denylist and jobs_allowlist are specified.
     """
-    jobs_blacklist = jobs_blacklist if jobs_blacklist else []
-    jobs_blacklist = [job.lower() for job in jobs_blacklist]
-    jobs_whitelist = jobs_whitelist if jobs_whitelist else []
-    jobs_whitelist = [job.lower() for job in jobs_whitelist]
+    jobs_denylist = jobs_denylist if jobs_denylist else []
+    jobs_denylist = [job.lower() for job in jobs_denylist]
+    jobs_allowlist = jobs_allowlist if jobs_allowlist else []
+    jobs_allowlist = [job.lower() for job in jobs_allowlist]
 
-    if jobs_whitelist and jobs_blacklist:
+    if jobs_allowlist and jobs_denylist:
       raise TurbiniaException(
-          'jobs_whitelist and jobs_blacklist cannot be specified at the same '
+          'jobs_allowlist and jobs_denylist cannot be specified at the same '
           'time.')
-    elif jobs_blacklist:
-      return [job for job in job_names if job.lower() not in jobs_blacklist]
-    elif jobs_whitelist:
-      return [job for job in job_names if job.lower() in jobs_whitelist]
+    elif jobs_denylist:
+      return [job for job in job_names if job.lower() not in jobs_denylist]
+    elif jobs_allowlist:
+      return [job for job in job_names if job.lower() in jobs_allowlist]
     else:
       return job_names
 
   @classmethod
-  def FilterJobObjects(cls, jobs, jobs_blacklist=None, jobs_whitelist=None):
+  def FilterJobObjects(cls, jobs, jobs_denylist=None, jobs_allowlist=None):
     """Filters a list of job objects against white/black lists.
 
-    jobs_whitelist and jobs_blacklist must not be specified at the same time.
+    jobs_allowlist and jobs_denylist must not be specified at the same time.
 
     Args:
       jobs (list[TurbiniaJob]): The jobs to filter.
-      jobs_blacklist (Optional[list[str]]): Job names to exclude.
-      jobs_whitelist (Optional[list[str]]): Job names to include.
+      jobs_denylist (Optional[list[str]]): Job names to exclude.
+      jobs_allowlist (Optional[list[str]]): Job names to include.
 
     Returns:
      list[TurbiniaJob]: Job objects
     """
     job_names = [job.NAME.lower() for job in jobs]
-    job_names = cls.FilterJobNames(job_names, jobs_blacklist, jobs_whitelist)
+    job_names = cls.FilterJobNames(job_names, jobs_denylist, jobs_allowlist)
     return [job for job in jobs if job.NAME.lower() in job_names]
 
   @classmethod
@@ -89,41 +91,41 @@ class JobsManager(object):
     """
     job_name = job_class.NAME.lower()
     if job_name not in cls._job_classes:
-      raise KeyError('job class not set for name: {0:s}'.format(job_class.NAME))
+      raise KeyError(f'job class not set for name: {job_class.NAME:s}')
 
     del cls._job_classes[job_name]
 
   @classmethod
-  def DeregisterJobs(cls, jobs_blacklist=None, jobs_whitelist=None):
+  def DeregisterJobs(cls, jobs_denylist=None, jobs_allowlist=None):
     """Deregisters a list of job names against white/black lists.
 
-    jobs_whitelist and jobs_blacklist must not be specified at the same time.
+    jobs_allowlist and jobs_denylist must not be specified at the same time.
 
     Args:
-      jobs_blacklist (Optional[list[str]]): Job names to deregister.
-      jobs_whitelist (Optional[list[str]]): Job names to register.
+      jobs_denylist (Optional[list[str]]): Job names to deregister.
+      jobs_allowlist (Optional[list[str]]): Job names to register.
 
     Raises:
-      TurbiniaException if both jobs_blacklist and jobs_whitelist are specified.
+      TurbiniaException if both jobs_denylist and jobs_allowlist are specified.
     """
     registered_jobs = list(cls.GetJobNames())
     jobs_remove = []
     # Create a list of jobs to deregister.
-    if jobs_whitelist and jobs_blacklist:
+    if jobs_allowlist and jobs_denylist:
       raise TurbiniaException(
-          'jobs_whitelist and jobs_blacklist cannot be specified at the same '
+          'jobs_allowlist and jobs_denylist cannot be specified at the same '
           'time.')
-    elif jobs_whitelist:
-      jobs_whitelist = [j.lower() for j in jobs_whitelist]
-      for j in jobs_whitelist:
+    elif jobs_allowlist:
+      jobs_allowlist = [j.lower() for j in jobs_allowlist]
+      for j in jobs_allowlist:
         if j not in registered_jobs:
-          msg = 'Error whitelisting jobs: Job {0!s} is not found in registered jobs {1!s}.'.format(
+          msg = 'Error allowlisting jobs: Job {0!s} is not found in registered jobs {1!s}.'.format(
               j, registered_jobs)
           raise TurbiniaException(msg)
-      jobs_remove = [j for j in registered_jobs if j not in jobs_whitelist]
-    elif jobs_blacklist:
-      jobs_blacklist = [j.lower() for j in jobs_blacklist]
-      jobs_remove = [j for j in jobs_blacklist if j in registered_jobs]
+      jobs_remove = [j for j in registered_jobs if j not in jobs_allowlist]
+    elif jobs_denylist:
+      jobs_denylist = [j.lower() for j in jobs_denylist]
+      jobs_remove = [j for j in jobs_denylist if j in registered_jobs]
 
     # Deregister the jobs.
     jobs_remove = [j.lower() for j in jobs_remove]
@@ -145,7 +147,7 @@ class JobsManager(object):
     """
     job_name = job_name.lower()
     if job_name not in cls._job_classes:
-      raise KeyError('job class not set for name: {0:s}.'.format(job_name))
+      raise KeyError(f'job class not set for name: {job_name:s}.')
 
     job_class = cls._job_classes[job_name]
     return job_class()
@@ -210,8 +212,7 @@ class JobsManager(object):
     """
     job_name = job_class.NAME.lower()
     if job_name in cls._job_classes:
-      raise KeyError(
-          'job class already set for name: {0:s}.'.format(job_class.NAME))
+      raise KeyError(f'job class already set for name: {job_class.NAME:s}.')
 
     cls._job_classes[job_name] = job_class
 
@@ -256,3 +257,30 @@ class JobsManager(object):
     if hasattr(job_class, 'docker_image') and job_class:
       docker_image = job_class.docker_image
     return docker_image
+
+  @classmethod
+  def RegisterTimeout(cls, job_name, timeout):
+    """Registers a timeout for the job.
+
+    Args:
+      job_name(str): name of the job.
+      timeout(int): The amount of seconds to wait before timing out.
+    """
+    job_name = job_name.lower()
+    cls._job_classes[job_name].timeout = timeout
+
+  @classmethod
+  def GetTimeoutValue(cls, job_name):
+    """Retrieves the timeout value associated with the job.
+
+    Args:
+      job_name(str): name of the job.
+
+    Returns:
+      timeout(int): The timeout value.
+    """
+    timeout = DEFAULT_TIMEOUT
+    job_class = cls._job_classes.get(job_name.lower())
+    if hasattr(job_class, 'timeout') and job_class:
+      timeout = job_class.timeout
+    return timeout

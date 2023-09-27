@@ -17,12 +17,14 @@
 from __future__ import unicode_literals
 
 from turbinia.workers import artifact
+from turbinia.evidence import ContainerdContainer
 from turbinia.evidence import Directory
 from turbinia.evidence import DockerContainer
+from turbinia.evidence import EwfDisk
 from turbinia.evidence import GoogleCloudDisk
 from turbinia.evidence import GoogleCloudDiskRawEmbedded
-from turbinia.evidence import ExportedFileArtifact
 from turbinia.evidence import RawDisk
+from turbinia.evidence import ExportedFileArtifact
 from turbinia.evidence import ReportText
 from turbinia.jobs import interface
 from turbinia.jobs import manager
@@ -34,10 +36,9 @@ class JupyterExtractionJob(interface.TurbiniaJob):
 
   # The types of evidence that this Job will process
   evidence_input = [
-      Directory, DockerContainer, RawDisk, GoogleCloudDisk,
-      GoogleCloudDiskRawEmbedded
+      ContainerdContainer, Directory, DockerContainer, EwfDisk, GoogleCloudDisk,
+      GoogleCloudDiskRawEmbedded, RawDisk
   ]
-
   evidence_output = [ExportedFileArtifact]
 
   NAME = 'JupyterExtractionJob'
@@ -76,7 +77,7 @@ class JupyterAnalysisJob(interface.TurbiniaJob):
     tasks = []
     for evidence_item in evidence:
       if evidence_item.artifact_name == 'JupyterConfigFile':
-        tasks.append(jupyter.JupyterAnalysisJob())
+        tasks.append(JupyterAnalysisTask())
     return tasks
 
 

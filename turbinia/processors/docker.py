@@ -23,6 +23,7 @@ import tempfile
 
 from turbinia import config
 from turbinia import TurbiniaException
+from turbinia.lib import utils
 
 log = logging.getLogger('turbinia')
 
@@ -49,29 +50,27 @@ def PreprocessMountDockerFS(docker_dir, container_id):
   config.LoadConfig()
   mount_prefix = config.MOUNT_DIR_PREFIX
 
+  if not os.path.isdir(docker_dir):
+    raise TurbiniaException(
+        f'Docker path {docker_dir:s} is not a valid directory')
+
   if os.path.exists(mount_prefix) and not os.path.isdir(mount_prefix):
     raise TurbiniaException(
-        'Mount dir {0:s} exists, but is not a directory'.format(mount_prefix))
+        f'Mount dir {mount_prefix:s} exists, but is not a directory')
   if not os.path.exists(mount_prefix):
-    log.info('Creating local mount parent directory {0:s}'.format(mount_prefix))
+    log.info(f'Creating local mount parent directory {mount_prefix:s}')
     try:
       os.makedirs(mount_prefix)
-    except OSError as e:
+    except OSError as exception:
       raise TurbiniaException(
-          'Could not create mount directory {0:s}: {1!s}'.format(
-              mount_prefix, e))
+          f'Could not create mount directory {mount_prefix:s}: {exception!s}')
 
   container_mount_path = tempfile.mkdtemp(prefix='turbinia', dir=mount_prefix)
 
   log.info(
       'Using docker_explorer to mount container {0:s} on {1:s}'.format(
           container_id, container_mount_path))
-  de_binary = None
-  for path in os.environ['PATH'].split(os.pathsep):
-    tentative_path = os.path.join(path, 'de.py')
-    if os.path.exists(tentative_path):
-      de_binary = tentative_path
-      break
+  de_binary = utils.get_exe_path('de.py')
 
   if not de_binary:
     raise TurbiniaException('Could not find docker-explorer script: de.py')
@@ -82,12 +81,12 @@ def PreprocessMountDockerFS(docker_dir, container_id):
       'sudo', de_binary, '-r', docker_dir, 'mount', container_id,
       container_mount_path
   ]
-  log.info('Running: {0:s}'.format(' '.join(mount_cmd)))
+  log.info(f"Running: {' '.join(mount_cmd):s}")
 
   try:
     subprocess.check_call(mount_cmd)
-  except subprocess.CalledProcessError as e:
+  except subprocess.CalledProcessError as exception:
     raise TurbiniaException(
-        'Could not mount container {0:s}: {1!s}'.format(container_id, e))
+        f'Could not mount container {container_id:s}: {exception!s}')
 
   return container_mount_path

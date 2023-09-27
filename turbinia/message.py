@@ -20,10 +20,8 @@ import codecs
 import copy
 import json
 import uuid
-
-import six
-
 import logging
+import six
 
 from turbinia import evidence
 from turbinia import TurbiniaException
@@ -31,26 +29,34 @@ from turbinia import TurbiniaException
 log = logging.getLogger('turbinia')
 
 
-class TurbiniaRequest(object):
+class TurbiniaRequest:
   """An object to request evidence to be processed.
 
   Attributes:
     request_id(str): A client specified ID for this request.
-    requestor(str): The username of who made the request.
+    group_id(str): A client specified group id for this request.
+    requester(str): The username of who made the request.
     recipe(dict): Recipe to use when processing this request.
     context(dict): A Dict of context data to be passed around with this request.
     evidence(list): A list of Evidence objects.
+    group_name (str): Name for grouping evidence.
+    reason (str): Reason or justification for Turbinia requests.
+    all_args (str): a string of commandline arguments provided to run client.
   """
 
   def __init__(
-      self, request_id=None, requester=None, recipe=None, context=None,
-      evidence_=None):
+      self, request_id=None, group_id=None, requester=None, recipe=None,
+      context=None, evidence=None, group_name=None, reason=None, all_args=None):
     """Initialization for TurbiniaRequest."""
     self.request_id = request_id if request_id else uuid.uuid4().hex
+    self.group_id = group_id if group_id else uuid.uuid4().hex
     self.requester = requester if requester else 'user_unspecified'
-    self.recipe = recipe if recipe else {}
+    self.recipe = recipe if recipe else {'globals': {}}
     self.context = context if context else {}
-    self.evidence = evidence_ if evidence_ else []
+    self.evidence = evidence if evidence else []
+    self.group_name = group_name if group_name else ''
+    self.reason = reason if reason else ''
+    self.all_args = all_args if all_args else ''
     self.type = self.__class__.__name__
 
   def to_json(self):
@@ -64,10 +70,10 @@ class TurbiniaRequest(object):
 
     try:
       serialized = json.dumps(serializable)
-    except TypeError as e:
+    except TypeError as exception:
       msg = (
           'JSON serialization of TurbiniaRequest object {0:s} failed: '
-          '{1:s}'.format(self.type, str(e)))
+          '{1:s}'.format(self.type, str(exception)))
       raise TurbiniaException(msg)
 
     return serialized
@@ -86,20 +92,20 @@ class TurbiniaRequest(object):
       if isinstance(json_str, six.binary_type):
         json_str = codecs.decode(json_str, 'utf-8')
       obj = json.loads(json_str)
-    except ValueError as e:
+    except ValueError as exception:
       raise TurbiniaException(
-          'Can not load json from string {0:s}'.format(str(e)))
+          f'Can not load json from string {str(exception):s}')
 
     if obj.get('type', None) != self.type:
       raise TurbiniaException(
-          'Deserialized object does not have type of {0:s}'.format(self.type))
+          f'Deserialized object does not have type of {self.type:s}')
 
     obj['evidence'] = [evidence.evidence_decode(e) for e in obj['evidence']]
     # pylint: disable=attribute-defined-outside-init
     self.__dict__ = obj
 
 
-class TurbiniaMessageBase(object):
+class TurbiniaMessageBase:
   """Base class to define common functions and interfaces around client/server
     communication.
   """
@@ -129,8 +135,8 @@ class TurbiniaMessageBase(object):
     request = TurbiniaRequest()
     try:
       request.from_json(message)
-    except TurbiniaException as e:
-      log.error('Error decoding message: {0:s}'.format(str(e)))
+    except TurbiniaException as exception:
+      log.error(f'Error decoding message: {str(exception):s}')
       return None
 
     return request

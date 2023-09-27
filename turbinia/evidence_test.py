@@ -17,10 +17,15 @@
 from __future__ import unicode_literals
 
 import json
+import mock
 import unittest
 
 from turbinia import evidence
 from turbinia import TurbiniaException
+
+
+class TestEvidence(evidence.Evidence):
+  POSSIBLE_STATES = [evidence.EvidenceState.MOUNTED]
 
 
 class TestTurbiniaEvidence(unittest.TestCase):
@@ -44,7 +49,6 @@ class TestTurbiniaEvidence(unittest.TestCase):
     collection.add_evidence(rawdisk)
     collection_json = collection.to_json()
     self.assertTrue(isinstance(collection_json, str))
-
     collection_new = evidence.evidence_decode(json.loads(collection_json))
     rawdisk_new = collection_new.collection[0]
     # Make sure that both the collection, and the things in the collection
@@ -64,7 +68,7 @@ class TestTurbiniaEvidence(unittest.TestCase):
     collection_evidence = serialized_evidence['collection'][0]
 
     self.assertIsInstance(serialized_evidence, dict)
-    self.assertEqual(collection_evidence['name'], 'My Evidence')
+    self.assertEqual(collection_evidence['_name'], 'My Evidence')
 
   def testEvidenceSerializationBadType(self):
     """Test that evidence_decode throws error on non-dict type."""
@@ -92,3 +96,11 @@ class TestTurbiniaEvidence(unittest.TestCase):
     rawdisk = evidence.RawDisk(name='My Evidence', source_path='/tmp/foo')
     rawdisk.REQUIRED_ATTRIBUTES = ['doesnotexist']
     self.assertRaises(TurbiniaException, rawdisk.validate)
+
+  @mock.patch('turbinia.evidence.Evidence._preprocess')
+  def testEvidencePreprocess(self, mock_preprocess):
+    """Basic test for Evidence.preprocess()."""
+    test_evidence = TestEvidence()
+    test_evidence.preprocess(
+        'task123', required_states=[evidence.EvidenceState.ATTACHED])
+    mock_preprocess.assert_called_with(None, [evidence.EvidenceState.ATTACHED])

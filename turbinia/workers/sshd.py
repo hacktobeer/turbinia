@@ -20,6 +20,7 @@ import os
 import re
 
 from turbinia.evidence import ReportText
+from turbinia.evidence import EvidenceState as state
 from turbinia.lib import text_formatter as fmt
 from turbinia.workers import TurbiniaTask
 from turbinia.workers import Priority
@@ -27,6 +28,8 @@ from turbinia.workers import Priority
 
 class SSHDAnalysisTask(TurbiniaTask):
   """Task to analyze a sshd_config file."""
+
+  REQUIRED_STATES = [state.ATTACHED, state.CONTAINER_MOUNTED]
 
   def run(self, evidence, result):
     """Run the sshd_config analysis worker.
@@ -80,14 +83,14 @@ class SSHDAnalysisTask(TurbiniaTask):
         r'^\s*PermitRootLogin\s*(yes|prohibit-password|without-password)',
         re.IGNORECASE | re.MULTILINE)
     password_authentication_re = re.compile(
-        r'^\s*PasswordAuthentication[\s"]*No', re.IGNORECASE | re.MULTILINE)
+        r'^\s*PasswordAuthentication[\s"]*yes', re.IGNORECASE | re.MULTILINE)
     permit_empty_passwords_re = re.compile(
         r'^\s*PermitEmptyPasswords[\s"]*Yes', re.IGNORECASE | re.MULTILINE)
 
     if re.search(permit_root_login_re, config):
       findings.append(fmt.bullet('Root login enabled.'))
 
-    if not re.search(password_authentication_re, config):
+    if re.search(password_authentication_re, config):
       findings.append(fmt.bullet('Password authentication enabled.'))
 
     if re.search(permit_empty_passwords_re, config):

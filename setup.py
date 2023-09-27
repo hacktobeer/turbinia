@@ -44,7 +44,6 @@ with open('requirements.txt','r') as f:
   requirements = f.read().splitlines()
 setup(
     name='turbinia',
-    version=turbinia.__version__,
     description='Automation and Scaling of Digital Forensics Tools',
     long_description=turbinia_description,
     license='Apache License, Version 2.0',
@@ -63,8 +62,15 @@ setup(
     entry_points={'console_scripts': ['turbiniactl=turbinia.turbiniactl:main']},
     install_requires=requirements,
     extras_require={
-        'dev': ['mock', 'nose', 'yapf', 'celery~=4.1', 'coverage'],
-        'local': ['celery~=4.1', 'kombu~=4.1', 'redis~=3.0'],
-        'worker': ['plaso>=20171118', 'pyhindsight>=2.2.0']
-    }
+        'dev': ['mock', 'nose', 'yapf', 'celery', 'coverage'],
+        'local': ['celery', 'kombu', 'redis'],
+        'worker': [
+            'docker-explorer>=20191104',
+            'impacket',
+            'plaso>=20200430',
+            'pyhindsight>=20200607'
+        ]
+    },
+    use_scm_version=True,
+    setup_requires=['setuptools_scm']
 )
