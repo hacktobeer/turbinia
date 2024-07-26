@@ -16,6 +16,7 @@
 
 import io
 import logging
+import os
 import yaml
 import uvicorn
 
@@ -97,9 +98,12 @@ class TurbiniaAPIServer:
       app_name (str): module:app string used by Uvicorn
           to start the HTTP server.
     """
+    reload = False
+    if os.getenv('TURBINIA_DEBUG') == '1':
+      reload = True
     uvicorn.run(
         app_name, host=config.API_SERVER_ADDRESS, port=config.API_SERVER_PORT,
-        log_config=None, log_level='info', reload=False, workers=4)
+        log_config=None, log_level='info', reload=reload, workers=4)
 
 
 if __name__ == '__main__':

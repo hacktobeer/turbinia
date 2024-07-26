@@ -21,13 +21,24 @@ build:
     #     - turbinia/**
 
     # Uncomment below when developing on the Turbinia Server
-    - image: turbinia-server
+    # - image: turbinia-server
+    #   docker:
+    #     dockerfile: docker/server/Dockerfile
+    #     buildArgs:
+    #       TURBINIA_DEBUG: 1
+    #       TURBINIA_HOTRELOAD: 1
+    #       TURBINIA_DEBUG_PORT: 20000
+    #   sync:
+    #     infer:
+    #     - turbinia/**
+
+    # Uncomment below when developing on the Turbinia API Server
+    - image: turbinia-api-server
       docker:
-        dockerfile: docker/server/Dockerfile
+        dockerfile: docker/api_server/Dockerfile
         buildArgs:
           TURBINIA_DEBUG: 1
-          TURBINIA_HOTRELOAD: 1
-          TURBINIA_DEBUG_PORT: 20000
+          TURBINIA_DEBUG_PORT: 30000
       sync:
         infer:
         - turbinia/**
@@ -49,8 +60,11 @@ deploy:
         # worker.image.repository: "{{.IMAGE_REPO_turbinia_worker}}"
         # worker.image.tag: "{{.IMAGE_TAG_turbinia_worker}}@{{.IMAGE_DIGEST_turbinia_worker}}"
         ## Uncomment below if doing server development
-        server.image.repository: "{{.IMAGE_REPO_turbinia_server}}"
-        server.image.tag: "{{.IMAGE_TAG_turbinia_server}}@{{.IMAGE_DIGEST_turbinia_server}}"
+        # server.image.repository: "{{.IMAGE_REPO_turbinia_server}}"
+        # server.image.tag: "{{.IMAGE_TAG_turbinia_server}}@{{.IMAGE_DIGEST_turbinia_server}}"
+        ## Uncomment below if doing API server development
+        api.image.repository: "{{.IMAGE_REPO_turbinia_api_server}}"
+        api.image.tag: "{{.IMAGE_TAG_turbinia_api_server}}@{{.IMAGE_DIGEST_turbinia_api_server}}"
 portForward:
 - resourceType: deployment
   resourceName: dev-release-turbinia-api
